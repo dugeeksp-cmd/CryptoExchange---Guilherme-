@@ -269,33 +269,41 @@ export default function App() {
 
   // Persistent storage loaders
   useEffect(() => {
-    const vaultVersion = localStorage.getItem('kali_vault_v5_pagbank');
-    if (!vaultVersion) {
-      localStorage.clear();
-      localStorage.setItem('kali_vault_v5_pagbank', 'true');
-      setBalanceFiat(6323.00);
-      setPortfolio(INITIAL_PORTFOLIO);
-      setTransactions(INITIAL_TRANSACTIONS);
-      return;
-    }
+    try {
+      const vaultVersion = localStorage.getItem('kali_vault_v5_pagbank');
+      if (!vaultVersion) {
+        localStorage.clear();
+        localStorage.setItem('kali_vault_v5_pagbank', 'true');
+        setBalanceFiat(6323.00);
+        setPortfolio(INITIAL_PORTFOLIO);
+        setTransactions(INITIAL_TRANSACTIONS);
+        return;
+      }
 
-    const storedBalance = localStorage.getItem('kali_balance_fiat');
-    const storedPortfolio = localStorage.getItem('kali_portfolio');
-    const storedTransactions = localStorage.getItem('kali_transactions');
-    const storedSound = localStorage.getItem('kali_sound');
-    
-    if (storedBalance) setBalanceFiat(parseFloat(storedBalance));
-    if (storedPortfolio) setPortfolio(JSON.parse(storedPortfolio));
-    if (storedTransactions) setTransactions(JSON.parse(storedTransactions));
-    if (storedSound) setSoundEnabled(storedSound === 'true');
+      const storedBalance = localStorage.getItem('kali_balance_fiat');
+      const storedPortfolio = localStorage.getItem('kali_portfolio');
+      const storedTransactions = localStorage.getItem('kali_transactions');
+      const storedSound = localStorage.getItem('kali_sound');
+      
+      if (storedBalance) setBalanceFiat(parseFloat(storedBalance));
+      if (storedPortfolio) setPortfolio(JSON.parse(storedPortfolio));
+      if (storedTransactions) setTransactions(JSON.parse(storedTransactions));
+      if (storedSound) setSoundEnabled(storedSound === 'true');
+    } catch (e) {
+      console.warn('localStorage not available:', e);
+    }
   }, []);
 
   // Sync state to localstorage
   useEffect(() => {
-    localStorage.setItem('kali_balance_fiat', balanceFiat.toString());
-    localStorage.setItem('kali_portfolio', JSON.stringify(portfolio));
-    localStorage.setItem('kali_transactions', JSON.stringify(transactions));
-    localStorage.setItem('kali_sound', soundEnabled.toString());
+    try {
+      localStorage.setItem('kali_balance_fiat', balanceFiat.toString());
+      localStorage.setItem('kali_portfolio', JSON.stringify(portfolio));
+      localStorage.setItem('kali_transactions', JSON.stringify(transactions));
+      localStorage.setItem('kali_sound', soundEnabled.toString());
+    } catch (e) {
+      console.warn('localStorage write failed:', e);
+    }
   }, [balanceFiat, portfolio, transactions, soundEnabled]);
 
   // Handle Boot logs sequence loading
@@ -706,8 +714,12 @@ export default function App() {
   // Reset local application
   const handleResetApp = () => {
     if (confirm('Aviso de Segurança: Deseja formatar as partições da carteira local e redefinir as chaves?')) {
-      localStorage.clear();
-      localStorage.setItem('kali_vault_v5_pagbank', 'true');
+      try {
+        localStorage.clear();
+        localStorage.setItem('kali_vault_v5_pagbank', 'true');
+      } catch (e) {
+        console.warn('localStorage clear failed:', e);
+      }
       setBalanceFiat(6323.00);
       setPortfolio(INITIAL_PORTFOLIO);
       setCoins(INITIAL_COINS);
