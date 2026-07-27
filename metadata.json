@@ -1,0 +1,6 @@
+{
+  "name": "Offline Crypto Vault",
+  "description": "Sistema de carteira offline de criptomoedas com design cyberpunk e de segurança inspirado no Kali Linux.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

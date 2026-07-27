@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+@layer utilities {
+  .crt-scanlines {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+      rgba(18, 16, 16, 0) 50%, 
+      rgba(0, 0, 0, 0.3) 50%
+    );
+    background-size: 100% 4px;
+    z-index: 50;
+    pointer-events: none;
+    opacity: 0.08;
+  }
+
+  .cyber-glow-cyan {
+    box-shadow: 0 0 15px rgba(6, 182, 212, 0.25), inset 0 0 8px rgba(6, 182, 212, 0.1);
+  }
+
+  .cyber-glow-green {
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.25), inset 0 0 8px rgba(16, 185, 129, 0.1);
+  }
+
+  .cyber-glow-purple {
+    box-shadow: 0 0 15px rgba(168, 85, 247, 0.25), inset 0 0 8px rgba(168, 85, 247, 0.1);
+  }
+
+  .terminal-cursor {
+    display: inline-block;
+    width: 8px;
+    height: 16px;
+    background-color: currentColor;
+    animation: cursor-blink 1s step-end infinite;
+    vertical-align: middle;
+  }
+
+  @keyframes cursor-blink {
+    from, to { background-color: transparent }
+    50% { background-color: currentColor }
+  }
+
+  /* Custom styled scrollbars for tech interface */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: rgba(15, 23, 42, 0.6);
+    border-radius: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: rgba(51, 65, 85, 0.8);
+    border: 1px solid rgba(6, 182, 212, 0.3);
+    border-radius: 4px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: rgba(6, 182, 212, 0.5);
+  }
+
+  /* Matrix stream effect */
+  @keyframes matrix-fade {
+    0% { opacity: 0; }
+    50% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  .matrix-cell {
+    animation: matrix-fade 3s infinite ease-in-out;
+  }
+}
