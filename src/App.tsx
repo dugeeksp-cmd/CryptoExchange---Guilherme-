@@ -919,18 +919,18 @@ export default function App() {
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               <div className="space-y-2">
                 <div className="flex justify-between items-center">
-                  <label className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider block">Inserir Chave AES (Senha: CryptoGui)</label>
-                  <span className="text-[10px] text-cyan-400 font-mono font-bold">Chave: CryptoGui</span>
+                  <label className="text-xs font-mono font-bold text-slate-400 uppercase tracking-wider block">Inserir Chave AES / Passcode</label>
+                  <span className="text-[10px] text-cyan-400 font-mono font-bold">CRIPTO: AES-256</span>
                 </div>
                 <div className="relative">
                   <input 
-                    type="text" 
+                    type="password" 
                     value={passcode}
                     onChange={(e) => {
                       setPasscode(e.target.value);
                       playBeep('keystroke');
                     }}
-                    placeholder="Digite CryptoGui"
+                    placeholder="Digite sua chave de acesso"
                     className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 text-center text-lg font-mono tracking-widest py-3 px-4 rounded text-cyan-300 outline-none transition-colors"
                     autoFocus
                   />
@@ -978,13 +978,13 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    setPasscode('CryptoGui');
+                    setPasscode((prev) => prev.slice(0, -1));
                     playBeep('click');
-                    addToast('Senha CryptoGui preenchida!', 'info');
                   }}
-                  className="py-2 bg-cyan-950/30 hover:bg-cyan-950/60 border border-cyan-500/40 rounded text-cyan-300 text-[10px] font-mono font-bold uppercase transition-colors cursor-pointer"
+                  className="py-2 bg-slate-900/60 hover:bg-cyan-950/30 border border-slate-800/80 rounded text-slate-300 text-xs font-mono font-bold uppercase transition-colors cursor-pointer"
+                  title="Apagar último caractere"
                 >
-                  AUTO-KEY
+                  DEL
                 </button>
               </div>
 
@@ -992,7 +992,7 @@ export default function App() {
                 type="submit" 
                 className="w-full bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold py-3.5 rounded font-mono uppercase tracking-widest text-xs transition-all cursor-pointer shadow-[0_0_20px_rgba(6,182,212,0.3)] hover:shadow-[0_0_25px_rgba(6,182,212,0.5)] border border-cyan-300 mt-2"
               >
-                AUTENTICAR ASSINATURA (CryptoGui)
+                AUTENTICAR ASSINATURA
               </button>
 
               <div className="pt-2 text-center text-[10px] text-slate-500 font-mono font-semibold uppercase tracking-wider">
