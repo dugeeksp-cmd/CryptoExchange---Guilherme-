@@ -1,12 +1,40 @@
 <!doctype html>
-<html lang="en">
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Offline Crypto Vault</title>
   </head>
   <body class="bg-[#060913] text-slate-100">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
+    <div id="root">
+      <!-- Fallback em HTML puro exibido caso o index.html seja aberto direto via file:// sem compilação do TypeScript -->
+      <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background-color: #060913; color: #f8fafc; font-family: monospace, sans-serif; padding: 20px; text-align: center;">
+        <div style="max-width: 540px; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.8);">
+          <div style="font-size: 40px; margin-bottom: 12px;">🛡️</div>
+          <h2 style="color: #38bdf8; font-size: 20px; font-weight: bold; margin-bottom: 12px; font-family: monospace;">KALI COLD VAULT OS</h2>
+          <p style="color: #94a3b8; font-size: 13px; line-height: 1.6; margin-bottom: 20px;">
+            Você está abrindo o código-fonte em <strong>React + TypeScript</strong> diretamente pelo arquivo local. Navegadores não executam arquivos <code style="color: #f43f5e; background: #1e293b; padding: 2px 6px; border-radius: 4px;">.tsx</code> sem compilação prévia.
+          </p>
+          
+          <div style="text-align: left; background: #020617; border: 1px solid #1e293b; border-radius: 8px; padding: 16px; margin-bottom: 20px; font-size: 12px; color: #cbd5e1; line-height: 1.8;">
+            <strong style="color: #38bdf8; display: block; margin-bottom: 8px;">Como usar o aplicativo:</strong>
+            <div style="margin-bottom: 8px;">
+              🌐 <strong>1. GitHub Pages (Recomendado):</strong><br/>
+              Acesse o link gerado pelo GitHub em <em>Settings &gt; Pages</em>.
+            </div>
+            <div style="margin-bottom: 8px;">
+              📦 <strong>2. Baixar a versão pronta (ZIP com dist):</strong><br/>
+              No seu GitHub, vá em <em>Actions &gt; Deploy &gt; Clique no último rodado &gt; Artifacts &gt; github-pages</em>.
+            </div>
+            <div>
+              💻 <strong>3. Rodar localmente no computador:</strong><br/>
+              Abra o terminal na pasta e rode:<br/>
+              <code style="color: #a3e635; display: block; background: #0f172a; padding: 8px; border-radius: 4px; margin-top: 4px; font-family: monospace;">npm install &amp;&amp; npm run dev</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>
