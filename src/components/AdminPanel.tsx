@@ -90,36 +90,69 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
 
   const loadAdminData = async () => {
     setLoading(true);
+    let connected = false;
+
+    const fetchWithTimeout = async <T,>(promise: Promise<T>, ms = 3500): Promise<T> => {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Timeout de conexão')), ms))
+      ]);
+    };
+
     try {
       // 1. Passwords
-      const pwdSnap = await getDoc(doc(db, 'system_passwords/operations'));
-      if (pwdSnap.exists()) {
-        setPasswords(pwdSnap.data() as OperationPasswords);
-      } else {
+      try {
+        const pwdSnap = await fetchWithTimeout(getDoc(doc(db, 'system_passwords/operations')));
+        if (pwdSnap.exists()) {
+          setPasswords(pwdSnap.data() as OperationPasswords);
+          connected = true;
+        } else {
+          setPasswords(storage.loadPasswords());
+        }
+      } catch (e) {
+        console.warn('Pwd fetch fallback:', e);
         setPasswords(storage.loadPasswords());
       }
 
       // 2. Market Settings
-      const mktSnap = await getDoc(doc(db, 'system_config/market'));
-      if (mktSnap.exists()) {
-        setMarketSettings(mktSnap.data() as MarketSettings);
-      } else {
+      try {
+        const mktSnap = await fetchWithTimeout(getDoc(doc(db, 'system_config/market')));
+        if (mktSnap.exists()) {
+          setMarketSettings(mktSnap.data() as MarketSettings);
+          connected = true;
+        } else {
+          setMarketSettings(storage.loadMarketSettings());
+        }
+      } catch (e) {
+        console.warn('Market fetch fallback:', e);
         setMarketSettings(storage.loadMarketSettings());
       }
 
       // 3. Coins
-      const coinsSnap = await getDoc(doc(db, 'system_data/coins'));
-      if (coinsSnap.exists() && Array.isArray(coinsSnap.data()?.list)) {
-        setCoins(coinsSnap.data()?.list);
-      } else {
+      try {
+        const coinsSnap = await fetchWithTimeout(getDoc(doc(db, 'system_data/coins')));
+        if (coinsSnap.exists() && Array.isArray(coinsSnap.data()?.list) && coinsSnap.data()?.list.length > 0) {
+          setCoins(coinsSnap.data()?.list);
+          connected = true;
+        } else {
+          setCoins(storage.loadCoins([]));
+        }
+      } catch (e) {
+        console.warn('Coins fetch fallback:', e);
         setCoins(storage.loadCoins([]));
       }
 
       // 4. Transactions
-      const txSnap = await getDoc(doc(db, 'system_data/transactions'));
-      if (txSnap.exists() && Array.isArray(txSnap.data()?.list)) {
-        setTransactions(txSnap.data()?.list);
-      } else {
+      try {
+        const txSnap = await fetchWithTimeout(getDoc(doc(db, 'system_data/transactions')));
+        if (txSnap.exists() && Array.isArray(txSnap.data()?.list)) {
+          setTransactions(txSnap.data()?.list);
+          connected = true;
+        } else {
+          setTransactions(storage.loadTransactions([]));
+        }
+      } catch (e) {
+        console.warn('Tx fetch fallback:', e);
         setTransactions(storage.loadTransactions([]));
       }
 
@@ -127,33 +160,48 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
       setLogs(storage.loadSyncLogs());
 
       // 6. Stats
-      const statsSnap = await getDoc(doc(db, 'system_stats/general'));
-      if (statsSnap.exists()) {
-        setStats(statsSnap.data() as AdminDashboardStats);
+      try {
+        const statsSnap = await fetchWithTimeout(getDoc(doc(db, 'system_stats/general')));
+        if (statsSnap.exists()) {
+          setStats(statsSnap.data() as AdminDashboardStats);
+          connected = true;
+        }
+      } catch (e) {
+        console.warn('Stats fetch fallback:', e);
       }
 
       // 7. Wallet State (Balance & Portfolio)
-      const walletSnap = await getDoc(doc(db, 'wallet_state/main'));
-      if (walletSnap.exists()) {
-        const wData = walletSnap.data();
-        if (typeof wData.balanceFiat === 'number') setAdminBalanceInput(wData.balanceFiat);
-        if (wData.portfolio) setAdminPortfolioInput(wData.portfolio);
-      } else {
+      try {
+        const walletSnap = await fetchWithTimeout(getDoc(doc(db, 'wallet_state/main')));
+        if (walletSnap.exists()) {
+          const wData = walletSnap.data();
+          if (typeof wData.balanceFiat === 'number') setAdminBalanceInput(wData.balanceFiat);
+          if (wData.portfolio) setAdminPortfolioInput(wData.portfolio);
+          connected = true;
+        } else {
+          setAdminBalanceInput(storage.loadBalance(6323.00));
+          setAdminPortfolioInput(storage.loadPortfolio({ 'WMR': 0.02, 'DKBT': 0.01, 'NETH': 0.05, 'QSOL': 1.0, 'CYBR': 100.0 }));
+        }
+      } catch (e) {
+        console.warn('Wallet state fetch fallback:', e);
         setAdminBalanceInput(storage.loadBalance(6323.00));
         setAdminPortfolioInput(storage.loadPortfolio({ 'WMR': 0.02, 'DKBT': 0.01, 'NETH': 0.05, 'QSOL': 1.0, 'CYBR': 100.0 }));
       }
 
-      showStatus('Dados administrativos carregados com sucesso!', 'info');
+      if (connected) {
+        setStats(prev => ({ 
+          ...prev, 
+          firestoreStatus: 'CONECTADO', 
+          lastSyncTimestamp: new Date().toLocaleTimeString('pt-BR') 
+        }));
+        showStatus('Conectado ao Firebase com sucesso! Dados sincronizados.', 'success');
+      } else {
+        setStats(prev => ({ ...prev, firestoreStatus: 'DESCONECTADO' }));
+        showStatus('Usando cópia local para o Painel Admin', 'info');
+      }
     } catch (err) {
-      console.warn('Fallback para dados locais:', err);
-      setPasswords(storage.loadPasswords());
-      setMarketSettings(storage.loadMarketSettings());
-      setCoins(storage.loadCoins([]));
-      setTransactions(storage.loadTransactions([]));
-      setLogs(storage.loadSyncLogs());
-      setAdminBalanceInput(storage.loadBalance(6323.00));
-      setAdminPortfolioInput(storage.loadPortfolio({ 'WMR': 0.02, 'DKBT': 0.01, 'NETH': 0.05, 'QSOL': 1.0, 'CYBR': 100.0 }));
-      showStatus('Usando cópia local para o Painel Admin (servidor desconectado)', 'info');
+      console.warn('Fallback geral:', err);
+      showStatus('Usando cópia local para o Painel Admin', 'info');
     } finally {
       setLoading(false);
     }
