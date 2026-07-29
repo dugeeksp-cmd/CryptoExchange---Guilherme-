@@ -57,3 +57,25 @@ Para rodar e testar o projeto no seu computador:
    npm run dev
    ```
 3. Acesse o endereço exibido no terminal (ex: `http://localhost:3000`).
+
+---
+
+## 🐉 Solução para Kali Linux / Debian (`Unable to locate package npm`)
+
+### Se você baixou a pasta `artifact` do GitHub Actions:
+Você já tem os arquivos compilados! Não precisa do Node.js. O Kali Linux tem o **Python** pré-instalado:
+
+1. No terminal, dentro de `~/Downloads/artifact`, rode:
+   ```bash
+   python3 -m http.server 8080
+   ```
+2. Abra o seu navegador (Firefox) e acesse: `http://localhost:8080`
+
+### Se você precisa instalar o Node.js e o NPM no Kali Linux:
+O erro `Unable to locate package npm` ocorre porque a lista do `apt` precisa ser atualizada primeiro:
+
+```bash
+sudo apt update
+sudo apt install -y nodejs npm
+```
+Em seguida, rode novamente `npm install` na pasta do código-fonte.

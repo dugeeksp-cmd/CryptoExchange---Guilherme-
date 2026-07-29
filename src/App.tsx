@@ -8,37 +8,16 @@ import {
   Lock, Shield, ShieldAlert, Terminal, Send, Download, RefreshCw, 
   Copy, Check, Search, Activity, TrendingUp, TrendingDown, 
   Sparkles, Clock, AlertTriangle, SlidersHorizontal, 
-  WifiOff, Database, Cpu, Zap, Ghost, Flame, Eye, Play, Volume2, VolumeX,
-  Trash2, TerminalSquare, Info, CircleCheck, Building2, Landmark
+  WifiOff, Wifi, Database, Cpu, Zap, Ghost, Flame, Eye, Play, Volume2, VolumeX,
+  Trash2, TerminalSquare, Info, CircleCheck, Building2, Landmark, ShieldCheck, Key, Plus
 } from 'lucide-react';
 
-// Cryptocurrencies configuration
-interface Coin {
-  id: string;
-  name: string;
-  symbol: string;
-  price: number;
-  variation: number; // 24h variation
-  marketCap: number;
-  volume: number;
-  history: number[]; // For sparklines
-  iconName: string;
-  color: string;
-  isPrincipal?: boolean;
-}
-
-interface Transaction {
-  id: string;
-  timestamp: string;
-  type: 'ENVIADO' | 'RECEBIDO' | 'COMPRA' | 'VENDA';
-  coinSymbol: string;
-  amount: number;
-  fiatValue: number;
-  address: string;
-  bankName?: string;
-  hash: string;
-  status: 'SUCCESS' | 'SECURED_LOCAL' | 'PENDING';
-}
+import { Coin, Transaction, OperationPasswords, MarketSettings } from './types';
+import { firebaseConfig } from './lib/firebase';
+import { storage, DEFAULT_PASSWORDS, DEFAULT_MARKET_SETTINGS } from './lib/storage';
+import { downloadFromFirestore, uploadToFirestore, verifyPasswordInFirestore } from './lib/sync';
+import { calculateCoinOscillation } from './lib/market';
+import { AdminPanel } from './components/AdminPanel';
 
 export const BANK_OPTIONS = [
   'Itaú Unibanco',
@@ -140,16 +119,42 @@ export default function App() {
   const [portfolio, setPortfolio] = useState<Record<string, number>>(INITIAL_PORTFOLIO);
   const [coins, setCoins] = useState<Coin[]>(INITIAL_COINS);
   const [transactions, setTransactions] = useState<Transaction[]>(INITIAL_TRANSACTIONS);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+  
+  // Login passcode state
   const [passcode, setPasscode] = useState<string>('');
   const [loginError, setLoginError] = useState<boolean>(false);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
+
+  // Active navigation tab
   const [activeTab, setActiveTab] = useState<'carteira' | 'mercado' | 'terminal'>('carteira');
-  
-  // Dynamic Live Date & Time
   const [currentDateTime, setCurrentDateTime] = useState<string>('');
 
+  // FIREBASE & HYBRID OFFLINE/ONLINE STATES
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [lastSyncTimestamp, setLastSyncTimestamp] = useState<string>('NUNCA');
+  const [showAdminPanel, setShowAdminPanel] = useState<boolean>(false);
+
+  // PASSWORD PROMPT FOR SENSITIVE OPERATIONS
+  const [pwdModal, setPwdModal] = useState<{
+    open: boolean;
+    opType: 'buy' | 'sell' | 'receive' | 'send';
+    coinSymbol?: string;
+    inputPassword: string;
+    error: string | null;
+    pendingAction: (() => void) | null;
+  }>({
+    open: false,
+    opType: 'buy',
+    inputPassword: '',
+    error: null,
+    pendingAction: null
+  });
+
+  // Clock effect: Only updates if online!
   useEffect(() => {
     const updateDateTime = () => {
+      if (!isConnected) return; // FREEZE CLOCK WHEN OFFLINE
       const now = new Date();
       const day = now.getDate().toString().padStart(2, '0');
       const months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
@@ -164,15 +169,15 @@ export default function App() {
     updateDateTime();
     const interval = setInterval(updateDateTime, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isConnected]);
 
   // Terminal Logs state
   const [terminalLogs, setTerminalLogs] = useState<string[]>([
     'KALI COLD VAULT OS [v3.2.0-secure] inicializado.',
-    'Isolação de Rede Completa: INTERFACE RJ45/WIFI DESATIVADA.',
+    'Isolação de Rede Completa: SISTEMA HÍBRIDO OFFLINE / ONLINE ATIVADO.',
     'MOEDA PRINCIPAL DA CARTEIRA: WMR TOKEN (WMR)',
-    'Estado atual: OFFLINE SECURE VAULT.',
-    'Digite "help" para ver os comandos do terminal virtual.'
+    'Estado atual: OFFLINE (Dados congelados).',
+    'Clique em "CONECTAR" no topo para sincronizar com o servidor.'
   ]);
   const [terminalInput, setTerminalInput] = useState<string>('');
   
@@ -270,41 +275,24 @@ export default function App() {
   // Persistent storage loaders
   useEffect(() => {
     try {
-      const vaultVersion = localStorage.getItem('kali_vault_v5_pagbank');
-      if (!vaultVersion) {
-        localStorage.clear();
-        localStorage.setItem('kali_vault_v5_pagbank', 'true');
-        setBalanceFiat(6323.00);
-        setPortfolio(INITIAL_PORTFOLIO);
-        setTransactions(INITIAL_TRANSACTIONS);
-        return;
-      }
-
-      const storedBalance = localStorage.getItem('kali_balance_fiat');
-      const storedPortfolio = localStorage.getItem('kali_portfolio');
-      const storedTransactions = localStorage.getItem('kali_transactions');
-      const storedSound = localStorage.getItem('kali_sound');
-      
-      if (storedBalance) setBalanceFiat(parseFloat(storedBalance));
-      if (storedPortfolio) setPortfolio(JSON.parse(storedPortfolio));
-      if (storedTransactions) setTransactions(JSON.parse(storedTransactions));
-      if (storedSound) setSoundEnabled(storedSound === 'true');
+      storage.initStorage(6323.00, INITIAL_PORTFOLIO, INITIAL_COINS, INITIAL_TRANSACTIONS);
+      setBalanceFiat(storage.loadBalance(6323.00));
+      setPortfolio(storage.loadPortfolio(INITIAL_PORTFOLIO));
+      setCoins(storage.loadCoins(INITIAL_COINS));
+      setTransactions(storage.loadTransactions(INITIAL_TRANSACTIONS));
+      setLastSyncTimestamp(storage.loadLastSyncTime());
     } catch (e) {
-      console.warn('localStorage not available:', e);
+      console.warn('localStorage read error:', e);
     }
   }, []);
 
-  // Sync state to localstorage
+  // Save changes locally
   useEffect(() => {
-    try {
-      localStorage.setItem('kali_balance_fiat', balanceFiat.toString());
-      localStorage.setItem('kali_portfolio', JSON.stringify(portfolio));
-      localStorage.setItem('kali_transactions', JSON.stringify(transactions));
-      localStorage.setItem('kali_sound', soundEnabled.toString());
-    } catch (e) {
-      console.warn('localStorage write failed:', e);
-    }
-  }, [balanceFiat, portfolio, transactions, soundEnabled]);
+    storage.saveBalance(balanceFiat);
+    storage.savePortfolio(portfolio);
+    storage.saveCoins(coins);
+    storage.saveTransactions(transactions);
+  }, [balanceFiat, portfolio, coins, transactions]);
 
   // Handle Boot logs sequence loading
   useEffect(() => {
@@ -317,11 +305,8 @@ export default function App() {
       { t: '-> SECP256K1 key storage integrity: APPROVED', d: 200 },
       { t: '-> Mounting sandbox cold file system partition... [/dev/sdb1]', d: 400 },
       { t: '-> PRINCIPAL ASSET ATTACHED: WMR TOKEN (WMR)', d: 300 },
-      { t: '[✓] OFFLINE COLD HARDBOUND BRIDGE UNLOCKED', d: 250 },
-      { t: '-> Connecting to local blockchain node sync...', d: 450 },
-      { t: '-> Local sync success: 12 nodes verified offline.', d: 200 },
-      { t: '-> Loading 18 cryptocurrency market indices... DONE', d: 300 },
-      { t: '[🔒] SECURITY LEVEL 4 SECURE VAULT COLD WALLET ATTACHED', d: 300 },
+      { t: '[✓] CONEXÃO ONLINE INICIALIZADA', d: 250 },
+      { t: '-> Mode status: OFFLINE (FROZEN UNTIL CONNECTED)', d: 300 },
       { t: 'Pronto para entrada de chave de segurança do usuário.', d: 100 }
     ];
 
@@ -341,46 +326,34 @@ export default function App() {
     }
   }, [bootStep, currentScreen]);
 
-  // Dynamic price variations
+  // Dynamic price variations: ONLY RUNS WHEN ONLINE! (FROZEN WHEN OFFLINE)
   useEffect(() => {
+    if (!isConnected) return; // Freeze prices when offline!
     if (currentScreen !== 'dashboard' && currentScreen !== 'market') return;
+
+    const mktSettings = storage.loadMarketSettings();
+    const intervalMs = (mktSettings.intervalSeconds || 10) * 1000;
 
     const interval = setInterval(() => {
       setCoins((prevCoins) => {
         return prevCoins.map((coin) => {
           if (coin.symbol === 'ZST') return coin;
-
-          const percentShift = (Math.random() * 3.3 - 1.5) / 100;
-          const newPrice = Math.max(0.001, coin.price * (1 + percentShift));
-          const newHistory = [...coin.history.slice(1), newPrice];
-          const newVar = parseFloat((coin.variation + percentShift * 100).toFixed(2));
-          
-          return {
-            ...coin,
-            price: parseFloat(newPrice.toFixed(coin.price > 1000 ? 2 : 4)),
-            variation: newVar,
-            history: newHistory
-          };
+          return calculateCoinOscillation(coin, mktSettings);
         });
       });
       
-      if (Math.random() < 0.15) {
-        const auditMsgs = [
-          'AUDIT: Local wallet integrity re-verified successfully.',
-          'WMR CORE: Transmitting heartbeat block index...',
-          'SYS: Sandbox memory partition checked. 0 leaks.',
-          'CRYPTO-ENGINE: AES-256 state active.',
-          'KALI-FIREWALL: Blocked 0 inbound requests (Isolated).'
-        ];
-        const randomAudit = auditMsgs[Math.floor(Math.random() * auditMsgs.length)];
-        setTerminalLogs((prev) => [...prev.slice(-30), `[${new Date().toLocaleTimeString()}] ${randomAudit}`]);
+      if (Math.random() < 0.2) {
+        setTerminalLogs((prev) => [
+          ...prev.slice(-30), 
+          `[${new Date().toLocaleTimeString()}] SINCRONIZAÇÃO ONLINE: Preços e gráfico oscilados (Preset: ${mktSettings.preset})`
+        ]);
       }
-    }, 6000);
+    }, intervalMs);
 
     return () => clearInterval(interval);
-  }, [currentScreen]);
+  }, [currentScreen, isConnected]);
 
-  // Keep terminal logs auto-scrolling
+  // Auto-scroll terminal logs
   useEffect(() => {
     terminalEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [terminalLogs]);
@@ -394,7 +367,7 @@ export default function App() {
     e.preventDefault();
     if (passcode === 'CryptoGui') {
       playBeep('success');
-      addToast('Acesso autorizado. Bem-vindo ao Cold Vault.', 'success');
+      addToast('Acesso autorizado. Modo Offline ativado por padrão.', 'success');
       setTerminalLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ADMIN LOGGED IN - COLD WALLET MOUNTED`]);
       setCurrentScreen('dashboard');
     } else {
@@ -406,11 +379,110 @@ export default function App() {
     }
   };
 
+  // FIREBASE CONNECT HANDLER
+  const handleConnectFirebase = async () => {
+    setIsSyncing(true);
+    playBeep('click');
+    addToast('Conectando ao servidor e baixando dados...', 'info');
+    try {
+      const remote = await downloadFromFirestore(coins, transactions, balanceFiat, portfolio);
+      setCoins(remote.coins);
+      setTransactions(remote.transactions);
+      setBalanceFiat(remote.balanceFiat);
+      setPortfolio(remote.portfolio);
+      setLastSyncTimestamp(remote.lastSyncTimestamp);
+      setIsConnected(true);
+      playBeep('success');
+      addToast('Conectado ao servidor! Dados e cotações sincronizados.', 'success');
+      setTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SERVIDOR REMOTO CONECTADO`]);
+    } catch (err) {
+      console.error(err);
+      playBeep('error');
+      addToast('Erro ao conectar ao servidor. Verifique sua conexão.', 'error');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // FIREBASE DISCONNECT HANDLER
+  const handleDisconnectFirebase = async () => {
+    setIsSyncing(true);
+    playBeep('click');
+    try {
+      const ts = await uploadToFirestore(coins, transactions, balanceFiat, portfolio);
+      setLastSyncTimestamp(ts);
+      setIsConnected(false);
+      playBeep('click');
+      addToast('Desconectado. Modo Offline ativado (Informações congeladas).', 'info');
+      setTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DESCONECTADO DO SERVIDOR - Preços e valores congelados`]);
+    } catch (err) {
+      console.warn(err);
+      setIsConnected(false);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // OPERATION INITIATION WITH PASSWORD GUARD
+  const handleInitiateOperation = (
+    opType: 'buy' | 'sell' | 'receive' | 'send', 
+    coinSymbol?: string, 
+    onSuccessAction?: () => void
+  ) => {
+    if (!isConnected) {
+      playBeep('error');
+      addToast('Conecte-se ao servidor para realizar operações.', 'warning');
+      return;
+    }
+
+    setPwdModal({
+      open: true,
+      opType,
+      coinSymbol,
+      inputPassword: '',
+      error: null,
+      pendingAction: onSuccessAction || null
+    });
+  };
+
+  // VERIFY OPERATION PASSWORD SUBMIT
+  const handleVerifyOperationPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pwdModal.inputPassword.trim()) {
+      setPwdModal(prev => ({ ...prev, error: 'Digite a senha da operação.' }));
+      return;
+    }
+
+    try {
+      const valid = await verifyPasswordInFirestore(pwdModal.opType, pwdModal.inputPassword);
+      if (valid) {
+        playBeep('success');
+        addToast('Senha autorizada com sucesso!', 'success');
+        const action = pwdModal.pendingAction;
+        const op = pwdModal.opType;
+        const sym = pwdModal.coinSymbol;
+        setPwdModal({ open: false, opType: 'buy', inputPassword: '', error: null, pendingAction: null });
+        
+        if (action) {
+          action();
+        } else {
+          openModal(op, sym);
+        }
+      } else {
+        playBeep('error');
+        setPwdModal(prev => ({ ...prev, error: 'Senha inválida.' }));
+      }
+    } catch (err) {
+      console.error(err);
+      playBeep('error');
+      setPwdModal(prev => ({ ...prev, error: 'Erro ao validar senha no servidor.' }));
+    }
+  };
+
   // SVG QR Code generator
   const generateQRCodeSvg = (address: string) => {
     const size = 21;
     const grid = [];
-    
     let hash = 0;
     for (let i = 0; i < address.length; i++) {
       hash = address.charCodeAt(i) + ((hash << 5) - hash);
@@ -492,7 +564,7 @@ export default function App() {
     addToast(`${label} copiado para a área de transferência!`, 'success');
   };
 
-  // Open modals setup
+  // Open modal inner setup
   const openModal = (type: 'receive' | 'send' | 'sell' | 'buy', coinSymbol?: string) => {
     playBeep('click');
     const coin = coins.find((c) => c.symbol === (coinSymbol || 'WMR')) || coins[0];
@@ -531,14 +603,14 @@ export default function App() {
     setIsProcessingTx(true);
     playBeep('click');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
       const fiatEq = amountNum * modalSelectedCoin.price;
 
-      setPortfolio(prev => ({
-        ...prev,
+      const newPortfolio = {
+        ...portfolio,
         [modalSelectedCoin.symbol]: parseFloat((availableAmount - amountNum).toFixed(6))
-      }));
+      };
 
       const newTx: Transaction = {
         id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -553,19 +625,26 @@ export default function App() {
         status: 'SECURED_LOCAL'
       };
 
-      setTransactions(prev => [newTx, ...prev]);
+      const newTxList = [newTx, ...transactions];
+
+      setPortfolio(newPortfolio);
+      setTransactions(newTxList);
       setIsProcessingTx(false);
       setTxSuccessInfo(newTx);
       playBeep('success');
       addToast(`Transferência enviada com sucesso!`, 'success');
+
+      if (isConnected) {
+        await uploadToFirestore(coins, newTxList, balanceFiat, newPortfolio);
+      }
       
       setTerminalLogs(prev => [...prev, 
         `[${new Date().toLocaleTimeString()}] TRANS-OUT: ${amountNum} ${modalSelectedCoin.symbol} (${modalSelectedBank}) -> ${modalAddress.substring(0,10)}...`
       ]);
-    }, 1800);
+    }, 1500);
   };
 
-  // Run sell transaction (Crypto to USD fiat)
+  // Run sell transaction
   const handleConfirmSell = (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = parseFloat(modalAmount);
@@ -586,15 +665,15 @@ export default function App() {
     setIsProcessingTx(true);
     playBeep('click');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       const sellValue = amountNum * modalSelectedCoin.price;
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
 
-      setPortfolio(prev => ({
-        ...prev,
+      const newPortfolio = {
+        ...portfolio,
         [modalSelectedCoin.symbol]: parseFloat((availableAmount - amountNum).toFixed(6))
-      }));
-      setBalanceFiat(prev => parseFloat((prev + sellValue).toFixed(2)));
+      };
+      const newBalance = parseFloat((balanceFiat + sellValue).toFixed(2));
 
       const newTx: Transaction = {
         id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -609,11 +688,19 @@ export default function App() {
         status: 'SECURED_LOCAL'
       };
 
-      setTransactions(prev => [newTx, ...prev]);
+      const newTxList = [newTx, ...transactions];
+
+      setPortfolio(newPortfolio);
+      setBalanceFiat(newBalance);
+      setTransactions(newTxList);
       setIsProcessingTx(false);
       setTxSuccessInfo(newTx);
       playBeep('success');
       addToast(`Venda realizada: +$${sellValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})} creditados via ${modalSelectedBank}.`, 'success');
+
+      if (isConnected) {
+        await uploadToFirestore(coins, newTxList, newBalance, newPortfolio);
+      }
       
       setTerminalLogs(prev => [...prev, 
         `[${new Date().toLocaleTimeString()}] SELL-ORDER: Converteu ${amountNum} ${modalSelectedCoin.symbol} para $${sellValue.toFixed(2)} (${modalSelectedBank})`
@@ -621,7 +708,7 @@ export default function App() {
     }, 1500);
   };
 
-  // Run buy transaction (USD fiat to Crypto)
+  // Run buy transaction
   const handleConfirmBuy = (e: React.FormEvent) => {
     e.preventDefault();
     const amountNum = parseFloat(modalAmount);
@@ -642,14 +729,14 @@ export default function App() {
     setIsProcessingTx(true);
     playBeep('click');
 
-    setTimeout(() => {
+    setTimeout(async () => {
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
 
-      setBalanceFiat(prev => parseFloat((prev - totalCost).toFixed(2)));
-      setPortfolio(prev => ({
-        ...prev,
-        [modalSelectedCoin.symbol]: parseFloat(((prev[modalSelectedCoin.symbol] || 0) + amountNum).toFixed(6))
-      }));
+      const newBalance = parseFloat((balanceFiat - totalCost).toFixed(2));
+      const newPortfolio = {
+        ...portfolio,
+        [modalSelectedCoin.symbol]: parseFloat(((portfolio[modalSelectedCoin.symbol] || 0) + amountNum).toFixed(6))
+      };
 
       const newTx: Transaction = {
         id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -664,11 +751,19 @@ export default function App() {
         status: 'SECURED_LOCAL'
       };
 
-      setTransactions(prev => [newTx, ...prev]);
+      const newTxList = [newTx, ...transactions];
+
+      setBalanceFiat(newBalance);
+      setPortfolio(newPortfolio);
+      setTransactions(newTxList);
       setIsProcessingTx(false);
       setTxSuccessInfo(newTx);
       playBeep('success');
       addToast(`Compra efetuada: -$${totalCost.toLocaleString('pt-BR', {minimumFractionDigits: 2})} via ${modalSelectedBank}.`, 'success');
+
+      if (isConnected) {
+        await uploadToFirestore(coins, newTxList, newBalance, newPortfolio);
+      }
 
       setTerminalLogs(prev => [...prev, 
         `[${new Date().toLocaleTimeString()}] BUY-ORDER: Comprou ${amountNum} ${modalSelectedCoin.symbol} por $${totalCost.toFixed(2)} (${modalSelectedBank})`
@@ -677,7 +772,7 @@ export default function App() {
   };
 
   // Receive modal manual add
-  const handleSimulateReceiveFund = () => {
+  const handleSimulateReceiveFund = async () => {
     const receiveAmount = modalSelectedCoin.symbol === 'WMR' ? 1.0 : (modalSelectedCoin.symbol === 'DKBT' ? 0.05 : 5.0);
     const fiatValue = receiveAmount * modalSelectedCoin.price;
     const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
@@ -685,10 +780,10 @@ export default function App() {
     playBeep('success');
     addToast(`Recebimento efetuado via ${modalSelectedBank}: +${receiveAmount} ${modalSelectedCoin.symbol}`, 'success');
 
-    setPortfolio(prev => ({
-      ...prev,
-      [modalSelectedCoin.symbol]: parseFloat(((prev[modalSelectedCoin.symbol] || 0) + receiveAmount).toFixed(6))
-    }));
+    const newPortfolio = {
+      ...portfolio,
+      [modalSelectedCoin.symbol]: parseFloat(((portfolio[modalSelectedCoin.symbol] || 0) + receiveAmount).toFixed(6))
+    };
 
     const newTx: Transaction = {
       id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -703,8 +798,15 @@ export default function App() {
       status: 'SECURED_LOCAL'
     };
 
-    setTransactions(prev => [newTx, ...prev]);
+    const newTxList = [newTx, ...transactions];
+
+    setPortfolio(newPortfolio);
+    setTransactions(newTxList);
     setActiveModal(null);
+
+    if (isConnected) {
+      await uploadToFirestore(coins, newTxList, balanceFiat, newPortfolio);
+    }
 
     setTerminalLogs(prev => [...prev, 
       `[${new Date().toLocaleTimeString()}] TRANS-IN: Recebeu +${receiveAmount} ${modalSelectedCoin.symbol} (${modalSelectedBank})`
@@ -714,16 +816,12 @@ export default function App() {
   // Reset local application
   const handleResetApp = () => {
     if (confirm('Aviso de Segurança: Deseja formatar as partições da carteira local e redefinir as chaves?')) {
-      try {
-        localStorage.clear();
-        localStorage.setItem('kali_vault_v5_pagbank', 'true');
-      } catch (e) {
-        console.warn('localStorage clear failed:', e);
-      }
+      localStorage.clear();
       setBalanceFiat(6323.00);
       setPortfolio(INITIAL_PORTFOLIO);
       setCoins(INITIAL_COINS);
       setTransactions(INITIAL_TRANSACTIONS);
+      setIsConnected(false);
       setTerminalLogs([
         'KALI COLD VAULT OS redefinido.',
         'Novo keychain gerado localmente.',
@@ -752,24 +850,33 @@ export default function App() {
       newLogs.push('  wmr            - Detalhes e cotação da moeda principal WMR Token');
       newLogs.push('  banks          - Lista os bancos suportados para transferências');
       newLogs.push('  coins          - Lista todas as 18 criptomoedas ativas');
-      newLogs.push('  clear          - Limpa o histórico da tela do terminal');
-      newLogs.push('  audit          - Executa auditoria de integridade do enclave');
-      newLogs.push('  status         - Exibe métricas e isolamento do sistema');
+      newLogs.push('  connect        - Conecta ao Firebase');
+      newLogs.push('  disconnect     - Desconecta do Firebase (congela dados)');
+      newLogs.push('  clear          - Limpa o histórico do terminal');
+      newLogs.push('  audit          - Auditoria de integridade');
+    } else if (cmd === 'connect') {
+      handleConnectFirebase();
+      setTerminalInput('');
+      return;
+    } else if (cmd === 'disconnect') {
+      handleDisconnectFirebase();
+      setTerminalInput('');
+      return;
     } else if (cmd === 'balance') {
-      newLogs.push(`SALDO DISPONÍVEL FIAT: $${balanceFiat.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`);
+      newLogs.push(isConnected ? `SALDO DISPONÍVEL FIAT: $${balanceFiat.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'SALDO FIAT: OCULTO (MODO OFFLINE)');
       newLogs.push('PORTFÓLIO ATIVO:');
       Object.entries(portfolio).forEach(([symbol, qty]) => {
         const coin = coins.find((c) => c.symbol === symbol);
         const qtyNum = typeof qty === 'number' ? qty : parseFloat(qty as any) || 0;
         const val = qtyNum * (coin ? coin.price : 0);
-        newLogs.push(`  • ${symbol}: ${qtyNum} ($${val.toLocaleString('pt-BR', {minimumFractionDigits: 2})})`);
+        newLogs.push(`  • ${symbol}: ${qtyNum} ${isConnected ? `($${val.toLocaleString('pt-BR', {minimumFractionDigits: 2})})` : ''}`);
       });
     } else if (cmd === 'wmr') {
       const wmrCoin = coins.find(c => c.symbol === 'WMR');
       newLogs.push(`[WMR TOKEN - MOEDA PRINCIPAL]`);
       newLogs.push(`  Preço Atual: $${wmrCoin?.price.toLocaleString()}`);
       newLogs.push(`  Variação 24h: +${wmrCoin?.variation}%`);
-      newLogs.push(`  Custódia na Carteira: ${portfolio['WMR'] || 0} WMR ($${((portfolio['WMR'] || 0) * (wmrCoin?.price || 0)).toLocaleString()})`);
+      newLogs.push(`  Custódia na Carteira: ${portfolio['WMR'] || 0} WMR`);
     } else if (cmd === 'banks') {
       newLogs.push('BANCOS PARCEIROS REGISTRADOS:');
       BANK_OPTIONS.forEach(b => newLogs.push(`  - ${b}`));
@@ -782,17 +889,11 @@ export default function App() {
       setTerminalInput('');
       return;
     } else if (cmd === 'audit') {
-      newLogs.push('-> Executando checagem SHA256 em todas as chaves privadas...');
       newLogs.push('-> Hash de integridade WMR: INTEGRIDADE OK');
-      newLogs.push('-> Teste de isolamento de rede: 0 pacotes vazados.');
-      newLogs.push('[✓] AUDITORIA CONCLUÍDA - NENHUMA VULNERABILIDADE ENCONTRADA');
-    } else if (cmd === 'status') {
-      newLogs.push(`SISTEMA: KALI COLD VAULT OS v3.2.0`);
-      newLogs.push(`DATA DO SISTEMA: ${currentDateTime}`);
-      newLogs.push(`REDE: OFFLINE ISOLATED (RJ45/WiFi OFF)`);
-      newLogs.push(`ENCLAVE AES: ATIVO E SELADO`);
+      newLogs.push(`-> Estado Servidor: ${isConnected ? 'CONECTADO' : 'DESCONECTADO (OFFLINE)'}`);
+      newLogs.push('[✓] AUDITORIA CONCLUÍDA');
     } else {
-      newLogs.push(`Comando não reconhecido: "${cmd}". Digite "help" para ver os comandos.`);
+      newLogs.push(`Comando não reconhecido: "${cmd}". Digite "help" para ajuda.`);
     }
 
     setTerminalLogs(newLogs);
@@ -830,6 +931,31 @@ export default function App() {
     return tx.type === txHistoryFilter;
   });
 
+  // Check URL for admin access (e.g., /admin, ?admin, #admin)
+  useEffect(() => {
+    const checkAdminUrl = () => {
+      const path = window.location.pathname;
+      const search = window.location.search;
+      const hash = window.location.hash;
+      if (path.toLowerCase().includes('/admin') || search.toLowerCase().includes('admin') || hash.toLowerCase().includes('admin')) {
+        setShowAdminPanel(true);
+      }
+    };
+    checkAdminUrl();
+    window.addEventListener('popstate', checkAdminUrl);
+    return () => window.removeEventListener('popstate', checkAdminUrl);
+  }, []);
+
+  // If Admin view toggled
+  if (showAdminPanel) {
+    return <AdminPanel onBackToWallet={() => {
+      setShowAdminPanel(false);
+      if (window.location.search.includes('admin') || window.location.pathname.includes('/admin') || window.location.hash.includes('admin')) {
+        window.history.pushState({}, '', window.location.pathname.replace('/admin', '') || '/');
+      }
+    }} />;
+  }
+
   return (
     <div id="kali-root" className="min-h-screen bg-[#060913] text-slate-100 font-sans relative overflow-x-hidden select-none custom-scrollbar pb-10">
       
@@ -847,7 +973,7 @@ export default function App() {
             className={`pointer-events-auto flex items-center gap-3 p-3 rounded border shadow-xl transition-all duration-300 animate-slide-in-right ${
               t.type === 'success' ? 'bg-emerald-950/90 border-emerald-500 text-emerald-300' :
               t.type === 'error' ? 'bg-red-950/90 border-red-500 text-red-300' :
-              t.type === 'warning' ? 'bg-yellow-950/90 border-yellow-500 text-yellow-300' :
+              t.type === 'warning' ? 'bg-amber-950/90 border-amber-500 text-amber-300' :
               'bg-slate-900/95 border-cyan-500 text-cyan-200'
             }`}
           >
@@ -860,9 +986,7 @@ export default function App() {
         ))}
       </div>
 
-      {/* ========================================================= */}
-      {/* SCREEN 1: BOOTING SEQUENCE                                */}
-      {/* ========================================================= */}
+      {/* SCREEN 1: BOOTING SEQUENCE */}
       {currentScreen === 'boot' && (
         <div id="boot-screen" className="fixed inset-0 z-50 bg-[#02040a] flex flex-col justify-between p-6 md:p-12 font-mono text-emerald-400">
           <div className="max-w-4xl w-full mx-auto flex-1 overflow-y-auto custom-scrollbar flex flex-col gap-2 pt-4">
@@ -870,7 +994,7 @@ export default function App() {
               <Terminal className="w-8 h-8 animate-pulse text-cyan-400" />
               <div>
                 <h1 className="text-xl font-bold tracking-widest text-cyan-400">KALI SECURE CRYPTO COLD STORAGE</h1>
-                <p className="text-[10px] text-cyan-600 font-bold uppercase tracking-wider">SISTEMA DE CARTEIRA OFFLINE COM CRIPTOGRAFIA DE GRAU MILITAR</p>
+                <p className="text-[10px] text-cyan-600 font-bold uppercase tracking-wider">SISTEMA HÍBRIDO DE CARTEIRA OFFLINE / ONLINE</p>
               </div>
             </div>
 
@@ -886,7 +1010,7 @@ export default function App() {
           </div>
 
           <div className="w-full max-w-4xl mx-auto border-t border-slate-900 pt-4 flex flex-col sm:flex-row justify-between items-center text-[10px] text-slate-500 font-bold">
-            <div>VAULT STATUS: [ISOLADO DA REDE]</div>
+            <div>VAULT STATUS: [MODO OFFLINE POR PADRÃO]</div>
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
               <span>OFFLINE ENCRYPTED SECURE_BRIDGE ACTIVE</span>
@@ -895,9 +1019,7 @@ export default function App() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* SCREEN 2: LOGIN COMPONENT                                 */}
-      {/* ========================================================= */}
+      {/* SCREEN 2: LOGIN COMPONENT */}
       {currentScreen === 'login' && (
         <div id="login-screen" className="fixed inset-0 z-40 bg-[#03060d]/95 flex items-center justify-center p-4">
           <div className={`w-full max-w-md bg-slate-950/80 backdrop-blur-md p-6 md:p-8 rounded-xl border-2 transition-all duration-300 shadow-[0_0_40px_rgba(0,240,255,0.06)] ${
@@ -908,7 +1030,7 @@ export default function App() {
                 <Lock className="w-8 h-8 text-cyan-400" />
               </div>
               <h2 className="text-2xl font-black tracking-wide text-cyan-400 font-mono">COGNITIVE COLD VAULT</h2>
-              <p className="text-[11px] text-slate-400 uppercase tracking-widest font-mono font-bold mt-1">DISPOSITIVO DE SEGURANÇA OFFLINE</p>
+              <p className="text-[11px] text-slate-400 uppercase tracking-widest font-mono font-bold mt-1">CARTEIRA CRYPTO HÍBRIDA (OFFLINE + ONLINE)</p>
               
               <div className="mt-2 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-950/40 border border-emerald-500/20">
                 <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />
@@ -994,18 +1116,12 @@ export default function App() {
               >
                 AUTENTICAR ASSINATURA
               </button>
-
-              <div className="pt-2 text-center text-[10px] text-slate-500 font-mono font-semibold uppercase tracking-wider">
-                SISTEMA OPERACIONAL PROTEGIDO POR CRIPTOGRAFIA DE GRAU MILITAR
-              </div>
             </form>
           </div>
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* CORE WALLET LAYOUT                                        */}
-      {/* ========================================================= */}
+      {/* CORE WALLET LAYOUT */}
       {currentScreen !== 'boot' && currentScreen !== 'login' && (
         <div id="main-wallet-dashboard" className="max-w-7xl mx-auto px-4 pt-4 sm:pt-6 relative z-10 space-y-6">
           
@@ -1018,14 +1134,16 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-sm font-black font-mono tracking-widest text-slate-100 uppercase">KALI COLD VAULT</h1>
-                  <span className="text-[10px] bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded font-bold font-mono">V3.2-OFFLINE</span>
+                  <span className="text-[10px] bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded font-bold font-mono">v4.0 HÍBRIDO</span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="relative flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${isConnected ? 'bg-emerald-400' : 'bg-amber-400'} opacity-75`}></span>
+                    <span className={`relative inline-flex rounded-full h-2 w-2 ${isConnected ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
                   </span>
-                  <span className="text-[10px] text-emerald-400 font-bold font-mono uppercase tracking-wider">SISTEMA SEGURO ISOLADO • MOEDA PRINCIPAL WMR</span>
+                  <span className={`text-[10px] font-bold font-mono uppercase tracking-wider ${isConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {isConnected ? '🟢 CONECTADO ONLINE' : '🔴 MODO OFFLINE (DADOS CONGELADOS)'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1034,20 +1152,43 @@ export default function App() {
             <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-6 text-xs text-slate-400 font-mono font-bold">
               <div className="px-3 py-1.5 bg-slate-900/60 border border-slate-800 rounded flex items-center gap-2">
                 <Database className="w-4 h-4 text-cyan-400" />
-                <span>BLOCO LOCAL: <span className="text-cyan-400">#592.108</span></span>
+                <span>SERVIDOR: <span className="text-cyan-400 font-bold">{isConnected ? 'SINCRO ATIVA' : 'CONGELADO'}</span></span>
               </div>
               <div className="px-3 py-1.5 bg-slate-900/60 border border-slate-800 rounded flex items-center gap-2">
-                <WifiOff className="w-4 h-4 text-emerald-400" />
-                <span>REDE: <span className="text-emerald-400">OFFLINE SEGURO</span></span>
+                {isConnected ? <Wifi className="w-4 h-4 text-emerald-400" /> : <WifiOff className="w-4 h-4 text-amber-400" />}
+                <span>REDE: <span className={isConnected ? 'text-emerald-400' : 'text-amber-400'}>{isConnected ? 'ONLINE' : 'OFFLINE SEGURO'}</span></span>
               </div>
               <div className="px-3 py-1.5 bg-slate-900/60 border border-slate-800 rounded flex items-center gap-2">
                 <Clock className="w-4 h-4 text-amber-400 animate-pulse" />
-                <span className="uppercase text-amber-300">{currentDateTime || '2026'}</span>
+                <span className="uppercase text-amber-300">{isConnected ? currentDateTime : 'RELÓGIO CONGELADO'}</span>
               </div>
             </div>
 
-            {/* Right side controls */}
-            <div className="flex items-center gap-2">
+            {/* Right side controls: CONNECT / DISCONNECT & ADMIN */}
+            <div className="flex flex-wrap items-center gap-2">
+              {/* CONNECT / DISCONNECT BUTTON */}
+              {isConnected ? (
+                <button
+                  onClick={handleDisconnectFirebase}
+                  disabled={isSyncing}
+                  className="px-3.5 py-2 bg-rose-950/80 hover:bg-rose-900 border border-rose-600/80 text-rose-300 font-bold rounded-lg text-xs font-mono transition-all flex items-center gap-2 cursor-pointer shadow-lg"
+                  title="Desconectar do servidor e congelar informações"
+                >
+                  <WifiOff className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                  <span>DESCONECTAR</span>
+                </button>
+              ) : (
+                <button
+                  onClick={handleConnectFirebase}
+                  disabled={isSyncing}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black rounded-lg text-xs font-mono transition-all flex items-center gap-2 cursor-pointer shadow-lg shadow-emerald-950/40"
+                  title="Conectar ao servidor online e sincronizar dados"
+                >
+                  <Wifi className={`w-4 h-4 ${isSyncing ? 'animate-spin' : 'animate-pulse'}`} />
+                  <span>{isSyncing ? 'CONECTANDO...' : 'CONECTAR'}</span>
+                </button>
+              )}
+
               <button
                 onClick={() => {
                   setSoundEnabled(!soundEnabled);
@@ -1074,7 +1215,7 @@ export default function App() {
                 onClick={() => {
                   playBeep('click');
                   setCurrentScreen('login');
-                  addToast('Carteira bloqueada. Insira sua chave (CryptoGui) novamente.', 'info');
+                  addToast('Carteira bloqueada. Insira sua chave novamente.', 'info');
                 }}
                 className="p-2 border border-slate-800 hover:border-amber-500 hover:text-amber-400 rounded text-slate-400 transition-colors cursor-pointer"
                 title="Bloquear Carteira"
@@ -1083,6 +1224,20 @@ export default function App() {
               </button>
             </div>
           </header>
+
+          {/* OFFLINE WARNING BANNER */}
+          {!isConnected && (
+            <div className="bg-amber-950/80 border border-amber-600/60 rounded-xl p-3.5 text-xs font-mono text-amber-300 flex flex-wrap items-center justify-between gap-3 shadow-lg">
+              <div className="flex items-center gap-2.5 font-bold">
+                <WifiOff className="w-4.5 h-4.5 text-amber-400 flex-shrink-0" />
+                <span>MODO OFFLINE ATIVO: Informações congeladas. Valores Fiat ocultos.</span>
+              </div>
+              <div className="text-[11px] text-amber-400/90 font-semibold flex items-center gap-3">
+                <span>Conecte-se ao servidor para realizar operações.</span>
+                <span className="text-amber-200 bg-amber-900/60 border border-amber-700/60 px-2 py-0.5 rounded">Última Sincronização: {lastSyncTimestamp}</span>
+              </div>
+            </div>
+          )}
 
           {/* MAIN SCREEN SECTIONS SWITCHER NAVIGATION */}
           <nav className="flex border-b border-slate-800">
@@ -1130,9 +1285,7 @@ export default function App() {
             </button>
           </nav>
 
-          {/* ========================================================= */}
-          {/* TAB 1: COLD WALLET DASHBOARD                              */}
-          {/* ========================================================= */}
+          {/* TAB 1: COLD WALLET DASHBOARD */}
           {activeTab === 'carteira' && (
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               
@@ -1142,16 +1295,26 @@ export default function App() {
                 {/* GRAND TOTAL LEDGER CARD */}
                 <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.6)] relative overflow-hidden">
                   <div className="absolute top-0 right-0 p-3 bg-cyan-950/20 border-b border-l border-slate-800 rounded-bl-lg">
-                    <span className="text-[9px] text-cyan-400 font-mono font-bold tracking-wider">OFFLINE ENCRYPTED STATE</span>
+                    <span className="text-[9px] text-cyan-400 font-mono font-bold tracking-wider">
+                      {isConnected ? 'ONLINE SYNC STATE' : 'FROZEN OFFLINE STATE'}
+                    </span>
                   </div>
                   
                   <p className="text-xs text-slate-400 font-mono uppercase tracking-widest font-black">SALDO TOTAL DA CARTEIRA</p>
                   
                   <div className="mt-3 flex items-baseline gap-1.5">
-                    <span className="text-slate-500 text-xl font-bold font-mono">$</span>
-                    <span className="text-4xl font-black font-mono tracking-tight text-white">
-                      {grandTotalBalance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                    </span>
+                    {isConnected ? (
+                      <>
+                        <span className="text-slate-500 text-xl font-bold font-mono">$</span>
+                        <span className="text-4xl font-black font-mono tracking-tight text-white">
+                          {grandTotalBalance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                        </span>
+                      </>
+                    ) : (
+                      <div className="text-amber-400 font-mono text-lg font-bold">
+                        MODO OFFLINE (FIAT OCULTO)
+                      </div>
+                    )}
                   </div>
 
                   {/* WMR HIGHLIGHT BADGE */}
@@ -1160,19 +1323,29 @@ export default function App() {
                       <span className="text-[10px] text-cyan-400 font-mono font-black uppercase tracking-wider block">MOEDA PRINCIPAL DA CARTEIRA</span>
                       <span className="text-sm font-black font-mono text-white mt-0.5">{portfolio['WMR'] || 0} WMR</span>
                     </div>
-                    <span className="text-xs font-mono font-black text-cyan-300 bg-cyan-500/20 px-2 py-1 rounded border border-cyan-400/40">
-                      ${((portfolio['WMR'] || 0) * (coins.find(c => c.symbol === 'WMR')?.price || 0)).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                    </span>
+                    {isConnected ? (
+                      <span className="text-xs font-mono font-black text-cyan-300 bg-cyan-500/20 px-2 py-1 rounded border border-cyan-400/40">
+                        ${((portfolio['WMR'] || 0) * (coins.find(c => c.symbol === 'WMR')?.price || 0)).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                      </span>
+                    ) : (
+                      <span className="text-xs font-mono text-amber-400 bg-amber-950/40 px-2 py-1 rounded border border-amber-600/40 font-bold">
+                        DADOS CONGELADOS
+                      </span>
+                    )}
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-4 pt-4 border-t border-slate-900/80 font-mono">
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-wider">Disponível em Fiat</p>
-                      <p className="text-sm font-black text-slate-200 mt-0.5">${balanceFiat.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                      <p className="text-sm font-black text-slate-200 mt-0.5">
+                        {isConnected ? `$${balanceFiat.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'OCULTO (OFFLINE)'}
+                      </p>
                     </div>
                     <div>
                       <p className="text-[10px] text-slate-500 uppercase tracking-wider">Equivalente Cripto</p>
-                      <p className="text-sm font-black text-cyan-400 mt-0.5">${totalCryptoFiatValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                      <p className="text-sm font-black text-cyan-400 mt-0.5">
+                        {isConnected ? `$${totalCryptoFiatValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'OCULTO (OFFLINE)'}
+                      </p>
                     </div>
                   </div>
 
@@ -1193,29 +1366,53 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* DIRECT MODAL TRIGGERS */}
-                  <div className="mt-6 grid grid-cols-3 gap-2">
-                    <button
-                      onClick={() => openModal('send')}
-                      className="py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-mono text-[11px] font-black uppercase tracking-widest rounded transition-all cursor-pointer shadow-[0_2px_10px_rgba(6,182,212,0.15)] hover:shadow-[0_4px_15px_rgba(6,182,212,0.3)] flex flex-col items-center gap-1.5 border border-cyan-300"
-                    >
-                      <Send className="w-4 h-4" />
-                      Enviar
-                    </button>
-                    <button
-                      onClick={() => openModal('receive')}
-                      className="py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-mono text-[11px] font-black uppercase tracking-widest rounded transition-all cursor-pointer shadow-[0_2px_10px_rgba(16,185,129,0.15)] hover:shadow-[0_4px_15px_rgba(16,185,129,0.3)] flex flex-col items-center gap-1.5 border border-emerald-300"
-                    >
-                      <Download className="w-4 h-4" />
-                      Receber
-                    </button>
-                    <button
-                      onClick={() => openModal('sell')}
-                      className="py-3 bg-purple-500 hover:bg-purple-400 text-slate-950 font-mono text-[11px] font-black uppercase tracking-widest rounded transition-all cursor-pointer shadow-[0_2px_10px_rgba(168,85,247,0.15)] hover:shadow-[0_4px_15px_rgba(168,85,247,0.3)] flex flex-col items-center gap-1.5 border border-purple-300"
-                    >
-                      <RefreshCw className="w-4 h-4" />
-                      Vender
-                    </button>
+                  {/* DIRECT MODAL TRIGGERS WITH OFFLINE LOCK */}
+                  <div className="mt-6 space-y-2">
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        onClick={() => handleInitiateOperation('send')}
+                        disabled={!isConnected}
+                        className={`py-3 font-mono text-[11px] font-black uppercase tracking-widest rounded transition-all cursor-pointer flex flex-col items-center gap-1.5 border ${
+                          isConnected 
+                            ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 border-cyan-300 shadow-[0_2px_10px_rgba(6,182,212,0.15)]' 
+                            : 'bg-slate-900 text-slate-600 border-slate-800 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <Send className="w-4 h-4" />
+                        Enviar
+                      </button>
+
+                      <button
+                        onClick={() => handleInitiateOperation('receive')}
+                        disabled={!isConnected}
+                        className={`py-3 font-mono text-[11px] font-black uppercase tracking-widest rounded transition-all cursor-pointer flex flex-col items-center gap-1.5 border ${
+                          isConnected 
+                            ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 border-emerald-300 shadow-[0_2px_10px_rgba(16,185,129,0.15)]' 
+                            : 'bg-slate-900 text-slate-600 border-slate-800 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <Download className="w-4 h-4" />
+                        Receber
+                      </button>
+
+                      <button
+                        onClick={() => handleInitiateOperation('sell')}
+                        disabled={!isConnected}
+                        className={`py-3 font-mono text-[11px] font-black uppercase tracking-widest rounded transition-all cursor-pointer flex flex-col items-center gap-1.5 border ${
+                          isConnected 
+                            ? 'bg-purple-500 hover:bg-purple-400 text-slate-950 border-purple-300 shadow-[0_2px_10px_rgba(168,85,247,0.15)]' 
+                            : 'bg-slate-900 text-slate-600 border-slate-800 opacity-50 cursor-not-allowed'
+                        }`}
+                      >
+                        <RefreshCw className="w-4 h-4" />
+                        Vender
+                      </button>
+                    </div>
+                    {!isConnected && (
+                      <p className="text-[10px] text-amber-400 font-mono text-center pt-1 font-semibold">
+                        * Conecte-se ao servidor para realizar operações.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -1236,8 +1433,10 @@ export default function App() {
                       <span className="text-cyan-400 font-black">AES-GCM-256</span>
                     </div>
                     <div className="flex justify-between items-center py-1 border-t border-slate-900/60">
-                      <span className="text-slate-500 font-semibold uppercase tracking-wider">Integridade Sandbox:</span>
-                      <span className="text-emerald-400 font-black">SECURE_VAULT_OK</span>
+                      <span className="text-slate-500 font-semibold uppercase tracking-wider">Estado do Servidor:</span>
+                      <span className={`font-black ${isConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                        {isConnected ? 'ONLINE (SINCRO ATIVA)' : 'OFFLINE (CONGELADO)'}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -1251,7 +1450,9 @@ export default function App() {
                       <Cpu className="w-5 h-5 text-cyan-400" />
                       <h3 className="text-xs font-mono font-black text-slate-200 uppercase tracking-widest">Ativos na Carteira (WMR Destaque)</h3>
                     </div>
-                    <span className="text-[10px] text-emerald-400 font-mono font-bold uppercase tracking-wider">ISOLADOS DA REDE</span>
+                    <span className={`text-[10px] font-mono font-bold uppercase tracking-wider ${isConnected ? 'text-emerald-400' : 'text-amber-400'}`}>
+                      {isConnected ? 'Sincronizado' : 'Informações Congeladas'}
+                    </span>
                   </div>
 
                   <div className="space-y-3">
@@ -1277,10 +1478,12 @@ export default function App() {
                                 )}
                               </div>
                               <p className="text-xs text-slate-400 font-mono mt-0.5">
-                                ${coin.price.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                                <span className={`text-[10px] ml-1.5 font-bold ${coin.variation >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                                  {coin.variation >= 0 ? '+' : ''}{coin.variation}%
-                                </span>
+                                {isConnected ? `$${coin.price.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'OFFLINE (Preço Congelado)'}
+                                {isConnected && (
+                                  <span className={`text-[10px] ml-1.5 font-bold ${coin.variation >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                                    {coin.variation >= 0 ? '+' : ''}{coin.variation}%
+                                  </span>
+                                )}
                               </p>
                             </div>
                           </div>
@@ -1292,7 +1495,9 @@ export default function App() {
 
                           <div className="text-right">
                             <p className="text-sm font-black font-mono text-slate-100">{qty.toLocaleString('pt-BR', {maximumFractionDigits: 6})} {coin.symbol}</p>
-                            <p className="text-xs font-mono text-cyan-400 mt-0.5">${fiatEq.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
+                            <p className="text-xs font-mono text-cyan-400 mt-0.5">
+                              {isConnected ? `$${fiatEq.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'Fiat Oculto'}
+                            </p>
                           </div>
                         </div>
                       );
@@ -1362,7 +1567,9 @@ export default function App() {
                           </div>
 
                           <div className="text-right flex sm:flex-col justify-between sm:justify-center items-center sm:items-end gap-2 sm:gap-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-900">
-                            <span className="text-xs font-bold font-mono text-slate-100">${tx.fiatValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
+                            <span className="text-xs font-bold font-mono text-slate-100">
+                              {isConnected ? `$${tx.fiatValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'Fiat Oculto'}
+                            </span>
                             <span className="text-[9px] bg-slate-950/60 border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider mt-0.5 uppercase">
                               {tx.status}
                             </span>
@@ -1376,9 +1583,7 @@ export default function App() {
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* TAB 2: CRYPTO MARKET INDEX (18 FUTURISTIC COINS WITH WMR) */}
-          {/* ========================================================= */}
+          {/* TAB 2: CRYPTO MARKET INDEX */}
           {activeTab === 'mercado' && (
             <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
               
@@ -1388,7 +1593,9 @@ export default function App() {
                   <Activity className="w-5 h-5 text-cyan-400 animate-pulse" />
                   <div>
                     <h3 className="text-xs font-mono font-black text-slate-200 uppercase tracking-widest">Cotação de Criptoativos da Carteira</h3>
-                    <p className="text-[10px] text-slate-500 font-mono font-bold uppercase mt-0.5">18 criptomoedas com suporte a WMR atualizando em tempo real</p>
+                    <p className="text-[10px] text-slate-500 font-mono font-bold uppercase mt-0.5">
+                      {isConnected ? '18 criptomoedas atualizando online' : 'Informações congeladas (Conecte ao servidor para atualizar)'}
+                    </p>
                   </div>
                 </div>
 
@@ -1398,163 +1605,144 @@ export default function App() {
                     <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
                     <input
                       type="text"
-                      placeholder="Buscar moeda (ex: WMR, DarkBit)..."
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full sm:w-60 bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded py-2 pl-9 pr-4 text-xs font-mono text-cyan-300 outline-none transition-colors"
+                      placeholder="Buscar por nome ou sigla..."
+                      className="bg-slate-900 border border-slate-800 focus:border-cyan-400 text-xs font-mono py-2 pl-9 pr-4 rounded text-slate-200 outline-none w-full sm:w-60"
                     />
                   </div>
 
-                  {/* Filter Select tag */}
-                  <select
-                    value={marketFilter}
-                    onChange={(e) => {
-                      setMarketFilter(e.target.value as any);
-                      playBeep('click');
-                    }}
-                    className="bg-slate-900 border border-slate-800 text-slate-300 text-xs font-mono py-2 px-3 rounded outline-none focus:border-cyan-400 cursor-pointer"
-                  >
-                    <option value="all">Filtro: Todas</option>
-                    <option value="gainers">Filtro: Altas (Gainers)</option>
-                    <option value="losers">Filtro: Baixas (Losers)</option>
-                  </select>
-
-                  {/* Sorter Select tag */}
-                  <select
-                    value={sortOption}
-                    onChange={(e) => {
-                      setSortOption(e.target.value);
-                      playBeep('click');
-                    }}
-                    className="bg-slate-900 border border-slate-800 text-slate-300 text-xs font-mono py-2 px-3 rounded outline-none focus:border-cyan-400 cursor-pointer"
-                  >
-                    <option value="rank">Ordenar por: Ranking</option>
-                    <option value="price-desc">Preço: Maior primeiro</option>
-                    <option value="price-asc">Preço: Menor primeiro</option>
-                    <option value="var-desc">Variação: Alta primeiro</option>
-                    <option value="var-asc">Variação: Baixa primeiro</option>
-                  </select>
+                  {/* Filter Gainers/Losers */}
+                  <div className="flex border border-slate-800 rounded overflow-hidden text-xs font-mono">
+                    <button
+                      onClick={() => setMarketFilter('all')}
+                      className={`px-3 py-2 ${marketFilter === 'all' ? 'bg-cyan-950 text-cyan-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
+                    >
+                      Todas
+                    </button>
+                    <button
+                      onClick={() => setMarketFilter('gainers')}
+                      className={`px-3 py-2 ${marketFilter === 'gainers' ? 'bg-emerald-950 text-emerald-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
+                    >
+                      +Altas
+                    </button>
+                    <button
+                      onClick={() => setMarketFilter('losers')}
+                      className={`px-3 py-2 ${marketFilter === 'losers' ? 'bg-red-950 text-red-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
+                    >
+                      -Baixas
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* LIST TABLE CONTAINER */}
-              <div className="overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left font-mono text-xs border-collapse">
+              {/* COINS TABLE */}
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse">
                   <thead>
-                    <tr className="border-b border-slate-900 text-slate-500 uppercase font-black text-[10px] tracking-wider">
-                      <th className="py-3 px-4">Rank</th>
-                      <th className="py-3 px-4">Nome</th>
-                      <th className="py-3 px-4">Preço</th>
+                    <tr className="border-b border-slate-800 text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+                      <th className="py-3 px-4"># Moeda</th>
+                      <th className="py-3 px-4">Preço (USD)</th>
                       <th className="py-3 px-4">Variação 24h</th>
-                      <th className="py-3 px-4 hidden md:table-cell">Market Cap</th>
-                      <th className="py-3 px-4 hidden lg:table-cell">Histórico</th>
-                      <th className="py-3 px-4 text-right">Ação Comercial</th>
+                      <th className="py-3 px-4 hidden md:table-cell">Tendência Sparkline</th>
+                      <th className="py-3 px-4 text-right">Ação</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-900/60">
-                    {filteredCoins.map((coin, index) => {
-                      const qtyOwned = portfolio[coin.symbol] || 0;
-                      return (
-                        <tr key={coin.id} className={`hover:bg-slate-900/30 transition-colors ${coin.isPrincipal ? 'bg-cyan-950/20' : ''}`}>
-                          <td className="py-3.5 px-4 font-bold text-slate-500">#{index + 1}</td>
-                          <td className="py-3.5 px-4">
-                            <div className="flex items-center gap-3">
-                              <span className="font-bold text-slate-200">{coin.name}</span>
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-slate-900/80 border border-slate-800" style={{ color: coin.color }}>
-                                {coin.symbol}
-                              </span>
-                              {coin.isPrincipal && (
-                                <span className="text-[9px] bg-cyan-500 text-slate-950 px-1.5 py-0.2 rounded font-black uppercase">
-                                  MOEDA PRINCIPAL
-                                </span>
-                              )}
-                              {qtyOwned > 0 && !coin.isPrincipal && (
-                                <span className="text-[9px] text-cyan-400 font-bold bg-cyan-950/20 border border-cyan-950 px-1 py-0.2 rounded">
-                                  {qtyOwned.toLocaleString('pt-BR', {maximumFractionDigits: 3})}
-                                </span>
-                              )}
+                  <tbody className="divide-y divide-slate-900 text-xs font-mono">
+                    {filteredCoins.map((coin, index) => (
+                      <tr key={coin.id} className="hover:bg-slate-900/60 transition-colors">
+                        <td className="py-3.5 px-4">
+                          <div className="flex items-center gap-3">
+                            <span className="text-slate-600 font-bold w-4">{index + 1}</span>
+                            <div className="p-1.5 bg-slate-950 border rounded text-xs font-black" style={{ color: coin.color, borderColor: `${coin.color}40` }}>
+                              {coin.symbol}
                             </div>
-                          </td>
-                          <td className="py-3.5 px-4 font-black text-slate-100">
-                            ${coin.price.toLocaleString('pt-BR', {minimumFractionDigits: coin.price > 1 ? 2 : 4})}
-                          </td>
-                          <td className="py-3.5 px-4">
-                            <span className={`inline-flex items-center gap-1 font-bold ${coin.variation >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                              {coin.variation >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                            <div>
+                              <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                                {coin.name}
+                                {coin.isPrincipal && (
+                                  <span className="text-[9px] bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 px-1 py-0.2 rounded">WMR</span>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-slate-500">{coin.symbol}</div>
+                            </div>
+                          </div>
+                        </td>
+
+                        <td className="py-3.5 px-4 font-bold text-slate-100">
+                          {isConnected ? `$${coin.price.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'OFFLINE'}
+                        </td>
+
+                        <td className="py-3.5 px-4 font-bold">
+                          {isConnected ? (
+                            <span className={coin.variation >= 0 ? 'text-emerald-400' : 'text-red-400'}>
                               {coin.variation >= 0 ? '+' : ''}{coin.variation}%
                             </span>
-                          </td>
-                          <td className="py-3.5 px-4 hidden md:table-cell text-slate-400">
-                            ${(coin.marketCap / 1000000).toFixed(1)}M
-                          </td>
-                          <td className="py-3.5 px-4 hidden lg:table-cell">
-                            {renderSparkline(coin.history, coin.color)}
-                          </td>
-                          <td className="py-3.5 px-4 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <button
-                                onClick={() => openModal('buy', coin.symbol)}
-                                className="px-2.5 py-1 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-[10px] uppercase rounded transition-colors cursor-pointer border border-cyan-300"
-                              >
-                                Compra
-                              </button>
-                              <button
-                                onClick={() => openModal('sell', coin.symbol)}
-                                className="px-2.5 py-1 bg-purple-500 hover:bg-purple-400 text-slate-950 font-bold text-[10px] uppercase rounded transition-colors cursor-pointer border border-purple-300"
-                              >
-                                Venda
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                          ) : (
+                            <span className="text-slate-500">Congelado</span>
+                          )}
+                        </td>
+
+                        <td className="py-3.5 px-4 hidden md:table-cell">
+                          {renderSparkline(coin.history, coin.color)}
+                        </td>
+
+                        <td className="py-3.5 px-4 text-right">
+                          <button
+                            onClick={() => handleInitiateOperation('buy', coin.symbol)}
+                            disabled={!isConnected}
+                            className={`px-3 py-1.5 rounded text-[11px] font-bold font-mono transition-colors cursor-pointer ${
+                              isConnected 
+                                ? 'bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300' 
+                                : 'bg-slate-900 text-slate-600 border border-slate-800 opacity-40 cursor-not-allowed'
+                            }`}
+                          >
+                            Comprar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* TAB 3: TERMINAL INTERATIVO CLI                            */}
-          {/* ========================================================= */}
+          {/* TAB 3: TERMINAL INTERATIVO */}
           {activeTab === 'terminal' && (
-            <div className="bg-[#020408] border-2 border-cyan-500/20 rounded-xl overflow-hidden shadow-[0_0_30px_rgba(0,240,255,0.05)]">
-              {/* Header */}
-              <div className="bg-slate-950/90 border-b border-slate-900 px-4 py-3 flex justify-between items-center">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-500" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-yellow-500" />
-                  <span className="w-2.5 h-2.5 rounded-full bg-green-500" />
-                  <span className="text-xs font-mono font-bold text-slate-400 ml-2">kali@coldvault: ~</span>
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-2xl font-mono text-xs space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-900 pb-3">
+                <div className="flex items-center gap-2 text-cyan-400">
+                  <TerminalSquare className="w-5 h-5" />
+                  <span className="font-bold uppercase tracking-wider">Terminal Virtual de Comandos Cold Enclave</span>
                 </div>
-                <div className="flex items-center gap-1">
-                  <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                  <span className="text-[10px] font-mono font-bold text-cyan-400 uppercase tracking-wider">CLI ACTIVA (WMR READY)</span>
-                </div>
+                <span className="text-[10px] text-slate-500">Digite "help" para lista de comandos</span>
               </div>
 
-              {/* Console logs */}
-              <div className="p-4 h-96 overflow-y-auto font-mono text-xs text-emerald-400 space-y-2 bg-[#020306] custom-scrollbar">
-                {terminalLogs.map((log, i) => (
-                  <div key={i} className="whitespace-pre-line leading-relaxed">
-                    {log}
-                  </div>
+              <div className="bg-[#02040a] border border-slate-900 p-4 rounded-lg h-80 overflow-y-auto custom-scrollbar space-y-1 text-emerald-400">
+                {terminalLogs.map((log, index) => (
+                  <div key={index} className="whitespace-pre-wrap">{log}</div>
                 ))}
                 <div ref={terminalEndRef} />
               </div>
 
-              {/* Command input form */}
-              <form onSubmit={handleTerminalSubmit} className="border-t border-slate-900 bg-slate-950 flex items-center px-4 py-3">
-                <span className="text-emerald-500 font-bold mr-2">kali@coldvault:~$</span>
-                <input
-                  type="text"
-                  value={terminalInput}
-                  onChange={(e) => setTerminalInput(e.target.value)}
-                  placeholder='Digite "help" para ver comandos (ex: wmr, banks, balance)...'
-                  className="flex-1 bg-transparent border-none outline-none text-emerald-300 font-mono text-xs"
-                  autoFocus
-                />
+              <form onSubmit={handleTerminalSubmit} className="flex gap-2">
+                <div className="relative flex-1">
+                  <span className="absolute left-3 top-2.5 text-cyan-400 font-bold">$</span>
+                  <input
+                    type="text"
+                    value={terminalInput}
+                    onChange={(e) => setTerminalInput(e.target.value)}
+                    placeholder="Digite um comando (ex: help, balance, connect, disconnect)..."
+                    className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 text-slate-200 py-2 pl-7 pr-3 rounded outline-none font-mono text-xs"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded cursor-pointer"
+                >
+                  Enviar
+                </button>
               </form>
             </div>
           )}
@@ -1562,388 +1750,185 @@ export default function App() {
         </div>
       )}
 
-      {/* ========================================================= */}
-      {/* TRANSACTION MODALS DIALOGS HUB                            */}
-      {/* ========================================================= */}
+      {/* MODAL DE SENHA DA OPERAÇÃO */}
+      {pwdModal.open && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-sm bg-slate-950 border-2 border-amber-500/60 p-6 rounded-xl shadow-2xl space-y-4 animate-in fade-in duration-200">
+            <div className="text-center space-y-1">
+              <div className="inline-flex p-3 bg-amber-950/40 border border-amber-500/30 rounded-full text-amber-400 mb-1">
+                <Key className="w-6 h-6 animate-pulse" />
+              </div>
+              <h3 className="text-sm font-black font-mono text-amber-400 uppercase tracking-wider">
+                AUTENTICAÇÃO DE OPERAÇÃO: {pwdModal.opType.toUpperCase()}
+              </h3>
+              <p className="text-[11px] text-slate-400 font-mono">
+                Informe a senha cadastrada no servidor para autorizar esta transação.
+              </p>
+            </div>
+
+            <form onSubmit={handleVerifyOperationPassword} className="space-y-4">
+              <div>
+                <input
+                  type="password"
+                  value={pwdModal.inputPassword}
+                  onChange={(e) => setPwdModal({ ...pwdModal, inputPassword: e.target.value, error: null })}
+                  placeholder="Digite a senha..."
+                  className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-lg px-4 py-3 text-center text-lg font-mono tracking-widest text-slate-100 outline-none"
+                  autoFocus
+                  required
+                />
+                {pwdModal.error && (
+                  <p className="text-xs text-rose-400 font-mono text-center font-bold mt-2 animate-bounce">
+                    {pwdModal.error}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPwdModal({ open: false, opType: 'buy', inputPassword: '', error: null, pendingAction: null })}
+                  className="w-1/2 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 font-mono text-xs rounded border border-slate-800 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="w-1/2 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono text-xs font-bold rounded cursor-pointer shadow-lg"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODALS STANDARD (SEND / RECEIVE / SELL / BUY) */}
       {activeModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-slate-950/95 border-2 border-cyan-500/30 rounded-xl overflow-hidden shadow-[0_0_50px_rgba(0,240,255,0.15)] animate-scale-in">
+          <div className="w-full max-w-md bg-slate-950 border border-cyan-500/40 p-6 rounded-xl shadow-2xl space-y-4 font-mono text-xs">
             
-            {/* Modal header */}
-            <div className="bg-slate-900/80 px-5 py-4 border-b border-slate-800 flex justify-between items-center">
-              <div className="flex items-center gap-2">
-                <Shield className="w-5 h-5 text-cyan-400" />
-                <h3 className="text-xs font-mono font-black text-slate-100 uppercase tracking-wider">
-                  {activeModal === 'receive' && 'RECEBER CRIPTOATIVO'}
-                  {activeModal === 'send' && 'ENVIAR CRIPTOATIVO'}
-                  {activeModal === 'sell' && 'CONVERSÃO DE VENDA'}
-                  {activeModal === 'buy' && 'CONVERSÃO DE COMPRA'}
-                </h3>
-              </div>
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h3 className="font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-2">
+                {activeModal === 'send' && <Send className="w-4 h-4" />}
+                {activeModal === 'receive' && <Download className="w-4 h-4" />}
+                {activeModal === 'sell' && <RefreshCw className="w-4 h-4" />}
+                {activeModal === 'buy' && <Plus className="w-4 h-4" />}
+                {activeModal.toUpperCase()} - {modalSelectedCoin.name} ({modalSelectedCoin.symbol})
+              </h3>
               <button 
-                onClick={() => {
-                  playBeep('click');
-                  setActiveModal(null);
-                }} 
-                className="text-slate-400 hover:text-slate-200 text-sm font-mono cursor-pointer"
+                onClick={() => setActiveModal(null)}
+                className="text-slate-500 hover:text-slate-200 text-sm font-bold"
               >
-                [X]
+                ✕
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div className="p-5 font-mono text-xs">
-              
-              {/* IF TRANSACTIONS WAS COMPLETED SUCCESSFULLY */}
-              {txSuccessInfo ? (
-                <div className="text-center py-6 space-y-4">
-                  <div className="inline-flex p-3 bg-emerald-950/40 border border-emerald-500/20 text-emerald-400 rounded-full cyber-glow-green">
-                    <Check className="w-8 h-8" />
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-black text-emerald-400">TRANSAÇÃO PROCESSADA!</h4>
-                    <p className="text-[10px] text-slate-400 uppercase tracking-wider mt-1">Registrada localmente com confirmação bancária</p>
-                  </div>
+            {/* RECEIVE MODAL */}
+            {activeModal === 'receive' && (
+              <div className="space-y-4 text-center">
+                <div className="flex justify-center">
+                  {generateQRCodeSvg(`0xKALI_LOCAL_${modalSelectedCoin.symbol}_VAULT`)}
+                </div>
 
-                  <div className="bg-slate-900/60 p-3 rounded text-left space-y-2 mt-4 text-[11px]">
-                    <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                      <span className="text-slate-500">ID da Transação:</span>
-                      <span className="text-slate-300 font-bold">{txSuccessInfo.id}</span>
-                    </div>
-                    <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                      <span className="text-slate-500">Operação:</span>
-                      <span className="text-cyan-400 font-bold">{txSuccessInfo.type}</span>
-                    </div>
-                    {txSuccessInfo.bankName && (
-                      <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                        <span className="text-slate-500">Banco Selecionado:</span>
-                        <span className="text-cyan-300 font-bold flex items-center gap-1">
-                          <Building2 className="w-3 h-3 text-cyan-400" />
-                          {txSuccessInfo.bankName}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                      <span className="text-slate-500">Montante:</span>
-                      <span className="text-slate-300 font-bold">{txSuccessInfo.amount} {txSuccessInfo.coinSymbol}</span>
-                    </div>
-                    <div className="flex justify-between border-b border-slate-800/60 pb-1">
-                      <span className="text-slate-500">Valor USD Fiat:</span>
-                      <span className="text-slate-300 font-bold">${txSuccessInfo.fiatValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 block mb-0.5">Hash do Ledger:</span>
-                      <span className="text-[9px] break-all text-emerald-400 select-all font-bold">{txSuccessInfo.hash}</span>
-                    </div>
-                  </div>
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded space-y-1">
+                  <span className="text-[10px] text-slate-500 uppercase font-bold">Endereço de Carga Local ({modalSelectedCoin.symbol})</span>
+                  <div className="text-cyan-300 font-bold break-all">0xKALI_LOCAL_{modalSelectedCoin.symbol}_VAULT</div>
+                </div>
 
-                  <button
-                    onClick={() => {
-                      playBeep('click');
-                      setActiveModal(null);
-                    }}
-                    className="w-full py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold uppercase rounded tracking-widest text-[10px] transition-colors cursor-pointer border border-cyan-300 mt-6"
+                <div>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1 text-left">Selecione o Banco Origem:</label>
+                  <select
+                    value={modalSelectedBank}
+                    onChange={(e) => setModalSelectedBank(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-slate-200 outline-none"
                   >
-                    CONCLUIR
+                    {BANK_OPTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+
+                <button
+                  onClick={handleSimulateReceiveFund}
+                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded uppercase tracking-wider cursor-pointer"
+                >
+                  Simular Depósito de Fundos
+                </button>
+              </div>
+            )}
+
+            {/* SEND / SELL / BUY FORM */}
+            {(activeModal === 'send' || activeModal === 'sell' || activeModal === 'buy') && (
+              <form 
+                onSubmit={
+                  activeModal === 'send' ? handleConfirmSend :
+                  activeModal === 'sell' ? handleConfirmSell :
+                  handleConfirmBuy
+                } 
+                className="space-y-4"
+              >
+                <div>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Selecione o Banco Parceiro:</label>
+                  <select
+                    value={modalSelectedBank}
+                    onChange={(e) => setModalSelectedBank(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-200 outline-none"
+                  >
+                    {BANK_OPTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Quantidade ({modalSelectedCoin.symbol}):</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={modalAmount}
+                    onChange={(e) => setModalAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-bold"
+                    required
+                  />
+                  {modalAmount && (
+                    <p className="text-[10px] text-cyan-400 mt-1">
+                      Equivalente em Fiat: ${(parseFloat(modalAmount || '0') * modalSelectedCoin.price).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                    </p>
+                  )}
+                </div>
+
+                {activeModal === 'send' && (
+                  <div>
+                    <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Endereço de Destino:</label>
+                    <input
+                      type="text"
+                      value={modalAddress}
+                      onChange={(e) => setModalAddress(e.target.value)}
+                      placeholder="0x..."
+                      className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-mono text-xs"
+                      required
+                    />
+                  </div>
+                )}
+
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveModal(null)}
+                    className="w-1/2 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProcessingTx}
+                    className="w-1/2 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded cursor-pointer shadow-lg"
+                  >
+                    {isProcessingTx ? 'Processando...' : 'Confirmar'}
                   </button>
                 </div>
-              ) : isProcessingTx ? (
-                /* LOADING LOADER PROCESSING */
-                <div className="text-center py-12 space-y-4">
-                  <RefreshCw className="w-10 h-10 text-cyan-400 animate-spin mx-auto" />
-                  <div>
-                    <h4 className="text-sm font-black text-cyan-400 animate-pulse">PROCESSANDO LEDGER SECURE...</h4>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mt-1">Conectando ao banco {modalSelectedBank}...</p>
-                  </div>
-                </div>
-              ) : (
-                /* ACTUAL MODAL FORMS BASED ON ACTIVE MODAL */
-                <div>
-                  
-                  {/* SELECT TARGET CRYPTO COIN INPUT */}
-                  <div className="mb-4">
-                    <label className="text-[10px] font-bold text-slate-400 block mb-1.5 uppercase">SELECIONAR MOEDA COLD</label>
-                    <select
-                      value={modalSelectedCoin.symbol}
-                      onChange={(e) => {
-                        const coin = coins.find((c) => c.symbol === e.target.value);
-                        if (coin) setModalSelectedCoin(coin);
-                        playBeep('click');
-                      }}
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 py-2.5 px-3 rounded outline-none text-slate-200 text-xs font-mono cursor-pointer"
-                    >
-                      {activeModal === 'buy' ? (
-                        coins.map((c) => (
-                          <option key={c.symbol} value={c.symbol}>{c.name} ({c.symbol}) - ${c.price.toLocaleString()}</option>
-                        ))
-                      ) : (
-                        coins.filter(c => ['WMR', 'DKBT', 'NETH', 'QSOL', 'CYBR'].includes(c.symbol)).map((c) => (
-                          <option key={c.symbol} value={c.symbol}>{c.name} ({c.symbol}) - ${c.price.toLocaleString()}</option>
-                        ))
-                      )}
-                    </select>
-                  </div>
+              </form>
+            )}
 
-                  {/* SELECT BANK FIELD FOR TRANSFER / TRANSACTION */}
-                  <div className="mb-4">
-                    <label className="text-[10px] font-bold text-cyan-400 flex items-center gap-1 mb-1.5 uppercase">
-                      <Landmark className="w-3.5 h-3.5 text-cyan-400" />
-                      SELECIONAR BANCO PARA ORIGEM/DESTINO
-                    </label>
-                    <select
-                      value={modalSelectedBank}
-                      onChange={(e) => {
-                        setModalSelectedBank(e.target.value);
-                        playBeep('click');
-                      }}
-                      className="w-full bg-slate-900 border border-cyan-500/40 focus:border-cyan-400 py-2.5 px-3 rounded outline-none text-slate-100 font-bold text-xs font-mono cursor-pointer"
-                    >
-                      {BANK_OPTIONS.map((bank) => (
-                        <option key={bank} value={bank}>{bank}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* ========================================================= */}
-                  {/* MODAL VIEW: RECEIVE COIN                                  */}
-                  {/* ========================================================= */}
-                  {activeModal === 'receive' && (
-                    <div className="space-y-4">
-                      <div className="flex flex-col items-center py-3 bg-slate-900/40 border border-slate-900 rounded">
-                        <div className="mb-3">
-                          {generateQRCodeSvg(`0xKALI_${modalSelectedCoin.symbol}_f4b7a77ff`)}
-                        </div>
-                        <span className="text-[9px] text-emerald-400 uppercase tracking-widest font-black animate-pulse">[🔒] QR-CODE SEGURO DA CARTEIRA</span>
-                      </div>
-
-                      <div className="space-y-1 bg-slate-900/60 p-3 rounded">
-                        <span className="text-[9px] text-slate-500 font-bold block uppercase">Endereço Público ({modalSelectedCoin.symbol})</span>
-                        <div className="flex justify-between items-center gap-2">
-                          <code className="text-[11px] text-cyan-300 break-all select-all font-mono">0xKALI_{modalSelectedCoin.symbol}_f4b7a77ff</code>
-                          <button
-                            onClick={() => handleCopyToClipboard(`0xKALI_${modalSelectedCoin.symbol}_f4b7a77ff`, 'Endereço')}
-                            className="p-1 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 rounded transition-colors cursor-pointer"
-                          >
-                            <Copy className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="text-[10px] text-slate-500 font-semibold bg-slate-900/30 p-2.5 rounded border border-slate-900/50">
-                        <span className="text-cyan-400 font-bold block mb-1">Injeção Direta de Fundos:</span>
-                        Receba os fundos diretamente na sua carteira vinculada ao banco <strong className="text-white">{modalSelectedBank}</strong>.
-                      </div>
-
-                      <button
-                        onClick={handleSimulateReceiveFund}
-                        className="w-full py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold uppercase rounded tracking-widest text-[10px] transition-colors cursor-pointer border border-emerald-300"
-                      >
-                        Confirmar Recebimento via {modalSelectedBank} (+{modalSelectedCoin.symbol === 'WMR' ? '1.0 WMR' : (modalSelectedCoin.symbol === 'DKBT' ? '0.05 DKBT' : '5.0')})
-                      </button>
-                    </div>
-                  )}
-
-                  {/* ========================================================= */}
-                  {/* MODAL VIEW: SEND COIN                                     */}
-                  {/* ========================================================= */}
-                  {activeModal === 'send' && (
-                    <form onSubmit={handleConfirmSend} className="space-y-4">
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">Endereço de Destino</label>
-                        <input
-                          type="text"
-                          required
-                          placeholder="Inserir endereço (ex: 0xTARGET_99ee2...)"
-                          value={modalAddress}
-                          onChange={(e) => setModalAddress(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 py-2 px-3 rounded outline-none text-slate-200 font-mono text-xs"
-                        />
-                      </div>
-
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase">Quantidade a Enviar</label>
-                          <span className="text-[10px] text-slate-500">Disponível: {(portfolio[modalSelectedCoin.symbol] || 0)} {modalSelectedCoin.symbol}</span>
-                        </div>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            step="any"
-                            required
-                            placeholder="0.00"
-                            value={modalAmount}
-                            onChange={(e) => setModalAmount(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 py-2.5 px-3 rounded outline-none text-slate-200 font-mono text-xs"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setModalAmount((portfolio[modalSelectedCoin.symbol] || 0).toString());
-                              playBeep('click');
-                            }}
-                            className="absolute right-2.5 top-2.5 bg-cyan-950/40 border border-cyan-500/30 text-cyan-400 px-2 py-0.5 rounded text-[10px] hover:bg-cyan-950/80 cursor-pointer"
-                          >
-                            MÁX
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Dynamic conversion feedback info */}
-                      {parseFloat(modalAmount) > 0 && (
-                        <div className="p-2.5 bg-slate-900/60 rounded text-[11px] text-slate-400 flex justify-between font-mono">
-                          <span>Equivalente Fiat:</span>
-                          <span className="text-white font-bold">${(parseFloat(modalAmount) * modalSelectedCoin.price).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                        </div>
-                      )}
-
-                      {/* Priority fee setting */}
-                      <div>
-                        <label className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">Prioridade da Taxa</label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setModalGasOption('standard');
-                              playBeep('click');
-                            }}
-                            className={`py-2 rounded border text-xs font-bold transition-all cursor-pointer ${
-                              modalGasOption === 'standard' 
-                                ? 'bg-cyan-950/20 text-cyan-400 border-cyan-500/40 shadow-inner' 
-                                : 'bg-slate-900/40 text-slate-500 border-slate-850 hover:text-slate-300'
-                            }`}
-                          >
-                            Normal (~10 min) • 0.001
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setModalGasOption('priority');
-                              playBeep('click');
-                            }}
-                            className={`py-2 rounded border text-xs font-bold transition-all cursor-pointer ${
-                              modalGasOption === 'priority' 
-                                ? 'bg-cyan-950/20 text-cyan-400 border-cyan-500/40 shadow-inner' 
-                                : 'bg-slate-900/40 text-slate-500 border-slate-850 hover:text-slate-300'
-                            }`}
-                          >
-                            Rápida (~2 min) • 0.005
-                          </button>
-                        </div>
-                      </div>
-
-                      <button
-                        type="submit"
-                        className="w-full py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold uppercase rounded tracking-widest text-[10px] transition-colors cursor-pointer border border-cyan-300 mt-4"
-                      >
-                        ASSINAR E ENVIAR VIA {modalSelectedBank.toUpperCase()}
-                      </button>
-                    </form>
-                  )}
-
-                  {/* ========================================================= */}
-                  {/* MODAL VIEW: SELL COIN                                     */}
-                  {/* ========================================================= */}
-                  {activeModal === 'sell' && (
-                    <form onSubmit={handleConfirmSell} className="space-y-4">
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase">Quantidade a Vender</label>
-                          <span className="text-[10px] text-slate-500">Disponível: {(portfolio[modalSelectedCoin.symbol] || 0)} {modalSelectedCoin.symbol}</span>
-                        </div>
-                        <div className="relative">
-                          <input
-                            type="number"
-                            step="any"
-                            required
-                            placeholder="0.00"
-                            value={modalAmount}
-                            onChange={(e) => setModalAmount(e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 py-2.5 px-3 rounded outline-none text-slate-200 font-mono text-xs"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setModalAmount((portfolio[modalSelectedCoin.symbol] || 0).toString());
-                              playBeep('click');
-                            }}
-                            className="absolute right-2.5 top-2.5 bg-cyan-950/40 border border-cyan-500/30 text-cyan-400 px-2 py-0.5 rounded text-[10px] hover:bg-cyan-950/80 cursor-pointer"
-                          >
-                            MÁX
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Display calculation value */}
-                      {parseFloat(modalAmount) > 0 && (
-                        <div className="p-3 bg-slate-900/60 border border-slate-800 rounded space-y-2 text-[11px] text-slate-300">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Valor Unitário:</span>
-                            <span>${modalSelectedCoin.price.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                          </div>
-                          <div className="flex justify-between border-t border-slate-800/80 pt-1.5 font-bold">
-                            <span className="text-emerald-400">USD Fiat a Depositar no {modalSelectedBank}:</span>
-                            <span className="text-emerald-400">${(parseFloat(modalAmount) * modalSelectedCoin.price).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        type="submit"
-                        className="w-full py-2.5 bg-purple-500 hover:bg-purple-400 text-slate-950 font-bold uppercase rounded tracking-widest text-[10px] transition-colors cursor-pointer border border-purple-300 mt-4"
-                      >
-                        CONFIRMAR VENDA E RESGATE NO {modalSelectedBank.toUpperCase()}
-                      </button>
-                    </form>
-                  )}
-
-                  {/* ========================================================= */}
-                  {/* MODAL VIEW: BUY COIN                                      */}
-                  {/* ========================================================= */}
-                  {activeModal === 'buy' && (
-                    <form onSubmit={handleConfirmBuy} className="space-y-4">
-                      <div>
-                        <div className="flex justify-between items-center mb-1">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase">Quantidade de {modalSelectedCoin.symbol} a Comprar</label>
-                          <span className="text-[10px] text-slate-500">Disponível USD: ${balanceFiat.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                        </div>
-                        <input
-                          type="number"
-                          step="any"
-                          required
-                          placeholder="0.00"
-                          value={modalAmount}
-                          onChange={(e) => setModalAmount(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 py-2.5 px-3 rounded outline-none text-slate-200 font-mono text-xs"
-                        />
-                      </div>
-
-                      {/* Cost dynamic update panel */}
-                      {parseFloat(modalAmount) > 0 && (
-                        <div className="p-3 bg-slate-900/60 border border-slate-800 rounded space-y-2 text-[11px] text-slate-300">
-                          <div className="flex justify-between">
-                            <span className="text-slate-500">Preço Unitário:</span>
-                            <span>${modalSelectedCoin.price.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                          </div>
-                          <div className="flex justify-between border-t border-slate-800/80 pt-1.5 font-bold">
-                            <span className="text-cyan-400">Total USD Fiat a Debitar ({modalSelectedBank}):</span>
-                            <span className="text-cyan-400">${(parseFloat(modalAmount) * modalSelectedCoin.price).toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-                          </div>
-                        </div>
-                      )}
-
-                      <button
-                        type="submit"
-                        className="w-full py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold uppercase rounded tracking-widest text-[10px] transition-colors cursor-pointer border border-cyan-300 mt-4"
-                      >
-                        CONFIRMAR COMPRA VIA {modalSelectedBank.toUpperCase()}
-                      </button>
-                    </form>
-                  )}
-
-                </div>
-              )}
-
-            </div>
           </div>
         </div>
       )}
