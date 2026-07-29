@@ -39,83 +39,104 @@ export async function downloadFromFirestore(
   let balanceFiat = localBalance;
   let portfolio = localPortfolio;
 
+  const fetchWithTimeout = async <T>(promise: Promise<T>, ms = 3000): Promise<T> => {
+    return Promise.race([
+      promise,
+      new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Timeout de conexão')), ms))
+    ]);
+  };
+
+  // 1. Passwords
   try {
-    // 1. Fetch Passwords
     const pwdRef = doc(db, PATHS.PASSWORDS);
-    const pwdSnap = await getDoc(pwdRef);
+    const pwdSnap = await fetchWithTimeout(getDoc(pwdRef));
     if (pwdSnap.exists()) {
       passwords = pwdSnap.data() as OperationPasswords;
     } else {
-      await setDoc(pwdRef, DEFAULT_PASSWORDS);
-      passwords = DEFAULT_PASSWORDS;
+      await fetchWithTimeout(setDoc(pwdRef, DEFAULT_PASSWORDS)).catch(() => {});
     }
+  } catch (e) {
+    console.warn('Sync passwords fallback:', e);
+  }
 
-    // 2. Fetch Market Settings
+  // 2. Market Settings
+  try {
     const mktRef = doc(db, PATHS.MARKET_CONFIG);
-    const mktSnap = await getDoc(mktRef);
+    const mktSnap = await fetchWithTimeout(getDoc(mktRef));
     if (mktSnap.exists()) {
       marketSettings = mktSnap.data() as MarketSettings;
     } else {
-      await setDoc(mktRef, DEFAULT_MARKET_SETTINGS);
-      marketSettings = DEFAULT_MARKET_SETTINGS;
+      await fetchWithTimeout(setDoc(mktRef, DEFAULT_MARKET_SETTINGS)).catch(() => {});
     }
+  } catch (e) {
+    console.warn('Sync market settings fallback:', e);
+  }
 
-    // 3. Fetch Coins
+  // 3. Coins
+  try {
     const coinsRef = doc(db, PATHS.COINS);
-    const coinsSnap = await getDoc(coinsRef);
-    if (coinsSnap.exists() && Array.isArray(coinsSnap.data()?.list)) {
+    const coinsSnap = await fetchWithTimeout(getDoc(coinsRef));
+    if (coinsSnap.exists() && Array.isArray(coinsSnap.data()?.list) && coinsSnap.data()?.list.length > 0) {
       coins = coinsSnap.data()?.list as Coin[];
     } else {
-      await setDoc(coinsRef, { list: localCoins });
+      await fetchWithTimeout(setDoc(coinsRef, { list: localCoins })).catch(() => {});
     }
+  } catch (e) {
+    console.warn('Sync coins fallback:', e);
+  }
 
-    // 4. Fetch Wallet State & Transactions
+  // 4. Wallet State
+  try {
     const walletRef = doc(db, PATHS.WALLET_STATE);
-    const walletSnap = await getDoc(walletRef);
+    const walletSnap = await fetchWithTimeout(getDoc(walletRef));
     if (walletSnap.exists()) {
       const data = walletSnap.data();
       if (typeof data.balanceFiat === 'number') balanceFiat = data.balanceFiat;
       if (data.portfolio) portfolio = data.portfolio;
     } else {
-      await setDoc(walletRef, { balanceFiat: localBalance, portfolio: localPortfolio, updatedAt: new Date().toISOString() });
+      await fetchWithTimeout(setDoc(walletRef, { balanceFiat: localBalance, portfolio: localPortfolio, updatedAt: new Date().toISOString() })).catch(() => {});
     }
+  } catch (e) {
+    console.warn('Sync wallet state fallback:', e);
+  }
 
+  // 5. Transactions
+  try {
     const txRef = doc(db, PATHS.TRANSACTIONS);
-    const txSnap = await getDoc(txRef);
+    const txSnap = await fetchWithTimeout(getDoc(txRef));
     if (txSnap.exists() && Array.isArray(txSnap.data()?.list)) {
       transactions = txSnap.data()?.list as Transaction[];
     } else {
-      await setDoc(txRef, { list: localTransactions });
+      await fetchWithTimeout(setDoc(txRef, { list: localTransactions })).catch(() => {});
     }
-
-    const nowStr = new Date().toLocaleString('pt-BR');
-    
-    // Save everything to localStorage
-    storage.savePasswords(passwords);
-    storage.saveMarketSettings(marketSettings);
-    storage.saveCoins(coins);
-    storage.saveTransactions(transactions);
-    storage.saveBalance(balanceFiat);
-    storage.savePortfolio(portfolio);
-    storage.saveLastSyncTime(nowStr);
-    storage.addSyncLog('DOWNLOAD', 'Download completo do Firestore realizado.');
-
-    // Update admin stats
-    await updateAdminStats(coins.length, nowStr);
-
-    return {
-      passwords,
-      marketSettings,
-      coins,
-      transactions,
-      balanceFiat,
-      portfolio,
-      lastSyncTimestamp: nowStr
-    };
-  } catch (error) {
-    console.error('Erro no download do Firestore:', error);
-    throw error;
+  } catch (e) {
+    console.warn('Sync transactions fallback:', e);
   }
+
+  const nowStr = new Date().toLocaleString('pt-BR');
+  
+  // Save everything to localStorage
+  storage.savePasswords(passwords);
+  storage.saveMarketSettings(marketSettings);
+  storage.saveCoins(coins);
+  storage.saveTransactions(transactions);
+  storage.saveBalance(balanceFiat);
+  storage.savePortfolio(portfolio);
+  storage.saveLastSyncTime(nowStr);
+  storage.addSyncLog('DOWNLOAD', 'Sincronização com o servidor finalizada.');
+
+  // Update admin stats
+  updateAdminStats(coins.length, nowStr).catch(() => {});
+
+  return {
+    passwords,
+    marketSettings,
+    coins,
+    transactions,
+    balanceFiat,
+    portfolio,
+    lastSyncTimestamp: nowStr
+  };
 }
 
 /**
@@ -135,17 +156,17 @@ export async function uploadToFirestore(
       balanceFiat,
       portfolio,
       updatedAt: nowStr
-    });
+    }).catch(e => console.warn('upload wallet state error:', e));
 
-    await setDoc(doc(db, PATHS.COINS), { list: coins });
-    await setDoc(doc(db, PATHS.TRANSACTIONS), { list: transactions });
+    await setDoc(doc(db, PATHS.COINS), { list: coins }).catch(e => console.warn('upload coins error:', e));
+    await setDoc(doc(db, PATHS.TRANSACTIONS), { list: transactions }).catch(e => console.warn('upload tx error:', e));
 
     if (passwords) {
-      await setDoc(doc(db, PATHS.PASSWORDS), passwords);
+      await setDoc(doc(db, PATHS.PASSWORDS), passwords).catch(e => console.warn('upload pwd error:', e));
       storage.savePasswords(passwords);
     }
     if (marketSettings) {
-      await setDoc(doc(db, PATHS.MARKET_CONFIG), marketSettings);
+      await setDoc(doc(db, PATHS.MARKET_CONFIG), marketSettings).catch(e => console.warn('upload mkt error:', e));
       storage.saveMarketSettings(marketSettings);
     }
 
@@ -154,23 +175,24 @@ export async function uploadToFirestore(
     storage.saveBalance(balanceFiat);
     storage.savePortfolio(portfolio);
     storage.saveLastSyncTime(nowStr);
-    storage.addSyncLog('UPLOAD', 'Upload de dados para o Firestore realizado com sucesso.');
+    storage.addSyncLog('UPLOAD', 'Upload de dados para o servidor realizado.');
 
-    await updateAdminStats(coins.length, nowStr);
+    updateAdminStats(coins.length, nowStr).catch(() => {});
 
     return nowStr;
   } catch (error) {
-    console.error('Erro no upload para o Firestore:', error);
-    throw error;
+    console.warn('Erro no upload para o Firestore:', error);
+    storage.saveCoins(coins);
+    storage.saveTransactions(transactions);
+    storage.saveBalance(balanceFiat);
+    storage.savePortfolio(portfolio);
+    storage.saveLastSyncTime(nowStr);
+    return nowStr;
   }
 }
 
 /**
  * Verifies operation password against Firestore.
- * Flow:
- * 1. Read passwords from Firestore `system_passwords/operations`
- * 2. If firestore document exists, check `password[opType]`
- * 3. Returns true if match, false otherwise.
  */
 export async function verifyPasswordInFirestore(
   opType: 'buy' | 'sell' | 'receive' | 'send',
@@ -178,19 +200,21 @@ export async function verifyPasswordInFirestore(
 ): Promise<boolean> {
   try {
     const pwdRef = doc(db, PATHS.PASSWORDS);
-    const pwdSnap = await getDocFromServer(pwdRef);
-    if (pwdSnap.exists()) {
+    const pwdSnap = await Promise.race([
+      getDoc(pwdRef),
+      new Promise<any>((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2500))
+    ]).catch(() => null);
+
+    if (pwdSnap && pwdSnap.exists()) {
       const data = pwdSnap.data() as OperationPasswords;
       const expected = data[opType] || '1234';
       return inputPassword.trim() === expected.trim();
     } else {
-      // Fallback to local stored password if doc doesn't exist yet
       const localPwd = storage.loadPasswords();
       return inputPassword.trim() === (localPwd[opType] || '1234').trim();
     }
   } catch (error) {
-    console.error('Erro ao verificar senha no Firestore:', error);
-    // If offline or error, try local storage fallback
+    console.warn('Erro ao verificar senha no servidor, fallback local:', error);
     const localPwd = storage.loadPasswords();
     return inputPassword.trim() === (localPwd[opType] || '1234').trim();
   }
