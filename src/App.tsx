@@ -17,6 +17,7 @@ import { firebaseConfig } from './lib/firebase';
 import { storage, DEFAULT_PASSWORDS, DEFAULT_MARKET_SETTINGS } from './lib/storage';
 import { downloadFromFirestore, uploadToFirestore, verifyPasswordInFirestore } from './lib/sync';
 import { calculateCoinOscillation } from './lib/market';
+import { isValidRandomPixKey, generateSamplePixKey } from './lib/validators';
 import { AdminPanel } from './components/AdminPanel';
 
 export const BANK_OPTIONS = [
@@ -596,7 +597,14 @@ export default function App() {
 
     if (!modalAddress.trim()) {
       playBeep('error');
-      addToast('Endereço de destino obrigatório!', 'error');
+      addToast('Chave PIX Aleatória de destino obrigatória!', 'error');
+      return;
+    }
+
+    // PIX KEY VALIDATION (UUID / EVP Random Format)
+    if (!isValidRandomPixKey(modalAddress)) {
+      playBeep('error');
+      addToast('Endereço de destino inválido! Formato obrigatório: Chave PIX Aleatória (ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c)', 'error');
       return;
     }
 
@@ -619,10 +627,10 @@ export default function App() {
         coinSymbol: modalSelectedCoin.symbol,
         amount: amountNum,
         fiatValue: parseFloat(fiatEq.toFixed(2)),
-        address: modalAddress,
+        address: modalAddress.trim(),
         bankName: modalSelectedBank,
         hash: generatedHash,
-        status: 'SECURED_LOCAL'
+        status: 'PENDENTE'
       };
 
       const newTxList = [newTx, ...transactions];
@@ -630,18 +638,19 @@ export default function App() {
       setPortfolio(newPortfolio);
       setTransactions(newTxList);
       setIsProcessingTx(false);
+      setActiveModal(null);
       setTxSuccessInfo(newTx);
       playBeep('success');
-      addToast(`Transferência enviada com sucesso!`, 'success');
+      addToast(`Transferência enviada! Gravada no histórico e enviada ao Admin para aprovação.`, 'success');
 
       if (isConnected) {
         await uploadToFirestore(coins, newTxList, balanceFiat, newPortfolio);
       }
       
       setTerminalLogs(prev => [...prev, 
-        `[${new Date().toLocaleTimeString()}] TRANS-OUT: ${amountNum} ${modalSelectedCoin.symbol} (${modalSelectedBank}) -> ${modalAddress.substring(0,10)}...`
+        `[${new Date().toLocaleTimeString()}] PIX-OUT: ${amountNum} ${modalSelectedCoin.symbol} (${modalSelectedBank}) -> ${modalAddress.substring(0,12)}... [PENDENTE]`
       ]);
-    }, 1500);
+    }, 1200);
   };
 
   // Run sell transaction
@@ -659,6 +668,19 @@ export default function App() {
     if (amountNum > availableAmount) {
       playBeep('error');
       addToast(`Saldo de ${modalSelectedCoin.symbol} insuficiente!`, 'error');
+      return;
+    }
+
+    if (!modalAddress.trim()) {
+      playBeep('error');
+      addToast('Chave PIX Aleatória de destino obrigatória para recebimento do valor!', 'error');
+      return;
+    }
+
+    // PIX KEY VALIDATION (UUID / EVP Random Format)
+    if (!isValidRandomPixKey(modalAddress)) {
+      playBeep('error');
+      addToast('Endereço de destino inválido! Formato obrigatório: Chave PIX Aleatória (ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c)', 'error');
       return;
     }
 
@@ -682,10 +704,10 @@ export default function App() {
         coinSymbol: modalSelectedCoin.symbol,
         amount: amountNum,
         fiatValue: parseFloat(sellValue.toFixed(2)),
-        address: `RESGATE BANCÁRIO (${modalSelectedBank})`,
+        address: modalAddress.trim(),
         bankName: modalSelectedBank,
         hash: generatedHash,
-        status: 'SECURED_LOCAL'
+        status: 'PENDENTE'
       };
 
       const newTxList = [newTx, ...transactions];
@@ -694,18 +716,19 @@ export default function App() {
       setBalanceFiat(newBalance);
       setTransactions(newTxList);
       setIsProcessingTx(false);
+      setActiveModal(null);
       setTxSuccessInfo(newTx);
       playBeep('success');
-      addToast(`Venda realizada: +$${sellValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})} creditados via ${modalSelectedBank}.`, 'success');
+      addToast(`Ordem de Venda registrada! Enviada ao histórico e para aprovação do Admin.`, 'success');
 
       if (isConnected) {
         await uploadToFirestore(coins, newTxList, newBalance, newPortfolio);
       }
       
       setTerminalLogs(prev => [...prev, 
-        `[${new Date().toLocaleTimeString()}] SELL-ORDER: Converteu ${amountNum} ${modalSelectedCoin.symbol} para $${sellValue.toFixed(2)} (${modalSelectedBank})`
+        `[${new Date().toLocaleTimeString()}] SELL-ORDER: ${amountNum} ${modalSelectedCoin.symbol} -> PIX ${modalAddress.substring(0,10)}... [PENDENTE]`
       ]);
-    }, 1500);
+    }, 1200);
   };
 
   // Run buy transaction
@@ -1896,17 +1919,36 @@ export default function App() {
                   )}
                 </div>
 
-                {activeModal === 'send' && (
+                {(activeModal === 'send' || activeModal === 'sell') && (
                   <div>
-                    <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Endereço de Destino:</label>
+                    <div className="flex justify-between items-center mb-1">
+                      <label className="block text-slate-400 text-[10px] uppercase font-bold">
+                        Chave PIX Aleatória de Destino (EVP/UUID):
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sampleKey = generateSamplePixKey();
+                          setModalAddress(sampleKey);
+                          playBeep('click');
+                          addToast('Chave PIX Aleatória Válida gerada!', 'info');
+                        }}
+                        className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono font-bold flex items-center gap-1 cursor-pointer"
+                      >
+                        <Sparkles className="w-3 h-3 text-cyan-400" /> Gerar Chave PIX
+                      </button>
+                    </div>
                     <input
                       type="text"
                       value={modalAddress}
                       onChange={(e) => setModalAddress(e.target.value)}
-                      placeholder="0x..."
-                      className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-mono text-xs"
+                      placeholder="ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded p-2.5 text-cyan-300 font-mono text-xs outline-none"
                       required
                     />
+                    <p className="text-[9px] text-slate-500 font-mono mt-1">
+                      Formato aceito: Chave PIX Aleatória EVP (UUID v4 com 32 a 36 caracteres hexadecimais).
+                    </p>
                   </div>
                 )}
 

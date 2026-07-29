@@ -27,7 +27,8 @@ export interface Transaction {
   address: string;
   bankName?: string;
   hash: string;
-  status: 'SUCCESS' | 'SECURED_LOCAL' | 'PENDING';
+  status: 'PENDENTE' | 'APROVADO' | 'RECUSADO' | 'SUCCESS' | 'SECURED_LOCAL' | 'PENDING';
+  rejectionReason?: string;
 }
 
 export interface OperationPasswords {
