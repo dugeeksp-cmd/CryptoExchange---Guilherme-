@@ -3,7 +3,7 @@ import {
   ShieldCheck, Database, Key, Coins, Sliders, Activity, RefreshCw, 
   Plus, Edit, Trash2, Check, AlertCircle, TrendingUp, TrendingDown, Clock, 
   Users, ArrowLeft, Save, Server, Shield, CheckCircle2, Lock, XCircle,
-  ArrowUpRight, ArrowDownLeft, ShoppingCart, Banknote, Search, Filter, MessageSquare
+  ArrowUpRight, ArrowDownLeft, ShoppingCart, Banknote, Search, Filter, MessageSquare, Wallet
 } from 'lucide-react';
 import { Coin, OperationPasswords, MarketSettings, SyncLog, AdminDashboardStats, Transaction } from '../types';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -20,7 +20,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
   const [adminAuthPassword, setAdminAuthPassword] = useState<string>('');
   const [authError, setAuthError] = useState<string | null>(null);
 
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'passwords' | 'coins' | 'market' | 'logs'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'wallet_edit' | 'passwords' | 'coins' | 'market' | 'logs'>('dashboard');
   const [loading, setLoading] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
@@ -30,6 +30,14 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
   const [coins, setCoins] = useState<Coin[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [logs, setLogs] = useState<SyncLog[]>([]);
+  const [adminBalanceInput, setAdminBalanceInput] = useState<number>(6323.00);
+  const [adminPortfolioInput, setAdminPortfolioInput] = useState<Record<string, number>>({
+    'WMR': 0.02,
+    'DKBT': 0.01,
+    'NETH': 0.05,
+    'QSOL': 1.0,
+    'CYBR': 100.0
+  });
   const [stats, setStats] = useState<AdminDashboardStats>({
     totalCoins: 0,
     totalWallets: 1,
@@ -124,6 +132,17 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
         setStats(statsSnap.data() as AdminDashboardStats);
       }
 
+      // 7. Wallet State (Balance & Portfolio)
+      const walletSnap = await getDoc(doc(db, 'wallet_state/main'));
+      if (walletSnap.exists()) {
+        const wData = walletSnap.data();
+        if (typeof wData.balanceFiat === 'number') setAdminBalanceInput(wData.balanceFiat);
+        if (wData.portfolio) setAdminPortfolioInput(wData.portfolio);
+      } else {
+        setAdminBalanceInput(storage.loadBalance(6323.00));
+        setAdminPortfolioInput(storage.loadPortfolio({ 'WMR': 0.02, 'DKBT': 0.01, 'NETH': 0.05, 'QSOL': 1.0, 'CYBR': 100.0 }));
+      }
+
       showStatus('Dados administrativos carregados com sucesso!', 'info');
     } catch (err) {
       console.warn('Fallback para dados locais:', err);
@@ -132,6 +151,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
       setCoins(storage.loadCoins([]));
       setTransactions(storage.loadTransactions([]));
       setLogs(storage.loadSyncLogs());
+      setAdminBalanceInput(storage.loadBalance(6323.00));
+      setAdminPortfolioInput(storage.loadPortfolio({ 'WMR': 0.02, 'DKBT': 0.01, 'NETH': 0.05, 'QSOL': 1.0, 'CYBR': 100.0 }));
       showStatus('Usando cópia local para o Painel Admin (servidor desconectado)', 'info');
     } finally {
       setLoading(false);
@@ -178,10 +199,64 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
     }
   };
 
+  // --- MANUAL WALLET EDIT HANDLER ---
+  const handleSaveWalletManual = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const updatedAt = new Date().toISOString();
+      await setDoc(doc(db, 'wallet_state/main'), {
+        balanceFiat: Number(adminBalanceInput),
+        portfolio: adminPortfolioInput,
+        updatedAt
+      });
+      storage.saveBalance(Number(adminBalanceInput));
+      storage.savePortfolio(adminPortfolioInput);
+      storage.addSyncLog('ADMIN_EDIT', `Edição manual: Saldo R$ (${adminBalanceInput}) e Portfólio atualizados pelo Administrador.`);
+      showStatus('Dados da carteira (Saldo em R$ e Portfólio) alterados com sucesso!', 'success');
+    } catch (err) {
+      console.error(err);
+      storage.saveBalance(Number(adminBalanceInput));
+      storage.savePortfolio(adminPortfolioInput);
+      showStatus('Salvo localmente (erro de conexão com o servidor)', 'info');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // --- TRANSACTION APPROVAL & REJECTION HANDLERS ---
   const handleApproveTransaction = async (txId: string) => {
     setLoading(true);
     try {
+      const targetTx = transactions.find(t => t.id === txId);
+      if (targetTx && targetTx.status !== 'APROVADO') {
+        let currentBalance = adminBalanceInput;
+        let currentPortfolio = { ...adminPortfolioInput };
+
+        if (targetTx.type === 'COMPRA') {
+          currentBalance = Math.max(0, currentBalance - targetTx.fiatValue);
+          currentPortfolio[targetTx.coinSymbol] = parseFloat(((currentPortfolio[targetTx.coinSymbol] || 0) + targetTx.amount).toFixed(6));
+        } else if (targetTx.type === 'VENDA') {
+          currentPortfolio[targetTx.coinSymbol] = parseFloat(Math.max(0, (currentPortfolio[targetTx.coinSymbol] || 0) - targetTx.amount).toFixed(6));
+          currentBalance = parseFloat((currentBalance + targetTx.fiatValue).toFixed(2));
+        } else if (targetTx.type === 'ENVIADO') {
+          currentPortfolio[targetTx.coinSymbol] = parseFloat(Math.max(0, (currentPortfolio[targetTx.coinSymbol] || 0) - targetTx.amount).toFixed(6));
+        } else if (targetTx.type === 'RECEBIDO') {
+          currentPortfolio[targetTx.coinSymbol] = parseFloat(((currentPortfolio[targetTx.coinSymbol] || 0) + targetTx.amount).toFixed(6));
+        }
+
+        setAdminBalanceInput(currentBalance);
+        setAdminPortfolioInput(currentPortfolio);
+
+        await setDoc(doc(db, 'wallet_state/main'), {
+          balanceFiat: currentBalance,
+          portfolio: currentPortfolio,
+          updatedAt: new Date().toISOString()
+        });
+        storage.saveBalance(currentBalance);
+        storage.savePortfolio(currentPortfolio);
+      }
+
       const updated = transactions.map(t => {
         if (t.id === txId) {
           return { ...t, status: 'APROVADO' as const, rejectionReason: undefined };
@@ -191,8 +266,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
       setTransactions(updated);
       await setDoc(doc(db, 'system_data/transactions'), { list: updated });
       storage.saveTransactions(updated);
-      storage.addSyncLog('ADMIN_EDIT', `Transação ${txId} APROVADA pelo Administrador.`);
-      showStatus(`Transação ${txId} APROVADA com sucesso!`, 'success');
+      storage.addSyncLog('ADMIN_EDIT', `Transação ${txId} APROVADA e dados processados.`);
+      showStatus(`Transação ${txId} APROVADA! Saldo e portfólio da carteira foram atualizados.`, 'success');
     } catch (err) {
       console.error(err);
       showStatus('Erro ao atualizar no servidor. Alteração salva localmente.', 'error');
@@ -532,6 +607,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
             </button>
 
             <button
+              onClick={() => setActiveTab('wallet_edit')}
+              className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'wallet_edit' ? 'bg-cyan-950 text-cyan-300 border border-cyan-600/50 shadow-md font-bold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              <Wallet className="w-4 h-4 text-cyan-400" />
+              Edição Manual da Carteira
+            </button>
+
+            <button
               onClick={() => setActiveTab('passwords')}
               className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-lg text-xs font-medium transition-all ${
                 activeTab === 'passwords' ? 'bg-cyan-950 text-cyan-300 border border-cyan-600/50 shadow-md font-bold' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
@@ -668,7 +753,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
                       type="text"
                       value={txSearchQuery}
                       onChange={(e) => setTxSearchQuery(e.target.value)}
-                      placeholder="Buscar por ID, chave PIX..."
+                      placeholder="Buscar por ID, destino..."
                       className="bg-slate-950 border border-slate-800 rounded pl-8 pr-3 py-1.5 text-slate-200 outline-none focus:border-cyan-500 w-48 text-xs"
                     />
                   </div>
@@ -790,10 +875,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
                           </div>
                         </div>
 
-                        {/* Transaction details & PIX Key */}
+                        {/* Transaction details & Destino */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-slate-900/60 p-3 rounded-lg border border-slate-800/80">
                           <div>
-                            <span className="text-slate-500 text-[10px] block font-bold uppercase">Chave PIX / Destino:</span>
+                            <span className="text-slate-500 text-[10px] block font-bold uppercase">Destino:</span>
                             <span className="text-cyan-300 font-bold break-all">{tx.address}</span>
                           </div>
                           <div>
@@ -817,6 +902,73 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
                   })}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* TAB: EDIÇÃO MANUAL DA CARTEIRA */}
+          {activeTab === 'wallet_edit' && (
+            <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
+              <div className="border-b border-slate-800 pb-4">
+                <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
+                  <Wallet className="w-5 h-5 text-cyan-400" /> Edição Manual da Carteira
+                </h3>
+                <p className="text-xs text-slate-400 mt-1 font-mono">
+                  Área exclusiva do Administrador para alterar manualmente qualquer saldo ou ativo na carteira do usuário.
+                </p>
+              </div>
+
+              <form onSubmit={handleSaveWalletManual} className="space-y-6 max-w-2xl font-mono text-xs">
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
+                  <label className="block text-cyan-400 font-bold uppercase tracking-wider text-[11px]">
+                    Saldo Total Fiat (R$):
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400 font-bold text-sm">R$</span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={adminBalanceInput}
+                      onChange={(e) => setAdminBalanceInput(parseFloat(e.target.value) || 0)}
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-lg px-3.5 py-2.5 text-slate-100 font-bold text-base outline-none"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-4">
+                  <label className="block text-emerald-400 font-bold uppercase tracking-wider text-[11px]">
+                    Saldos do Portfólio de Criptomoedas:
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {coins.map((coin) => (
+                      <div key={coin.symbol} className="bg-slate-900 p-3 rounded-lg border border-slate-800 space-y-1">
+                        <div className="flex justify-between items-center text-slate-300 font-bold">
+                          <span>{coin.name} ({coin.symbol})</span>
+                          <span className="text-[10px] text-slate-500">Cot: US$ {coin.price}</span>
+                        </div>
+                        <input
+                          type="number"
+                          step="0.000001"
+                          value={adminPortfolioInput[coin.symbol] !== undefined ? adminPortfolioInput[coin.symbol] : 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setAdminPortfolioInput(prev => ({ ...prev, [coin.symbol]: val }));
+                          }}
+                          className="w-full bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 font-bold outline-none"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="px-6 py-3 bg-gradient-to-r from-cyan-600 to-cyan-500 hover:from-cyan-500 hover:to-cyan-400 text-slate-950 font-black rounded-lg uppercase tracking-wider transition-all shadow-lg shadow-cyan-900/40 cursor-pointer flex items-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> Salvar Alterações na Carteira
+                </button>
+              </form>
             </div>
           )}
 

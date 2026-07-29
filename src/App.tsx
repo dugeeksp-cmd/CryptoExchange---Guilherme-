@@ -63,44 +63,7 @@ const INITIAL_COINS: Coin[] = [
   { id: 'cat', name: 'Catalyst', symbol: 'CAT', price: 7.45, variation: 3.6, marketCap: 14900000, volume: 745000, history: [7.12, 7.25, 7.18, 7.32, 7.40, 7.45], iconName: 'Flame', color: '#f97316' }
 ];
 
-const INITIAL_TRANSACTIONS: Transaction[] = [
-  { 
-    id: 'TX-94812P', 
-    timestamp: new Date().toLocaleString('pt-BR').substring(0, 16), 
-    type: 'VENDA', 
-    coinSymbol: 'WMR', 
-    amount: 0.0024, 
-    fiatValue: 444.48, 
-    address: 'RESGATE BANCÁRIO (PagBank • ~R$ 2.444,64)', 
-    bankName: 'PagBank', 
-    hash: '7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a8b', 
-    status: 'SECURED_LOCAL' 
-  },
-  { 
-    id: 'TX-83920P', 
-    timestamp: new Date().toLocaleString('pt-BR').substring(0, 16), 
-    type: 'VENDA', 
-    coinSymbol: 'NETH', 
-    amount: 0.11, 
-    fiatValue: 376.20, 
-    address: 'RESGATE BANCÁRIO (PagBank • ~R$ 2.069,10)', 
-    bankName: 'PagBank', 
-    hash: '1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c', 
-    status: 'SECURED_LOCAL' 
-  },
-  { 
-    id: 'TX-72019P', 
-    timestamp: new Date().toLocaleString('pt-BR').substring(0, 16), 
-    type: 'VENDA', 
-    coinSymbol: 'QSOL', 
-    amount: 1.9, 
-    fiatValue: 270.75, 
-    address: 'RESGATE BANCÁRIO (PagBank • ~R$ 1.489,12)', 
-    bankName: 'PagBank', 
-    hash: '3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d', 
-    status: 'SECURED_LOCAL' 
-  }
-];
+const INITIAL_TRANSACTIONS: Transaction[] = [];
 
 const INITIAL_PORTFOLIO: Record<string, number> = {
   'WMR': 0.02,
@@ -597,14 +560,7 @@ export default function App() {
 
     if (!modalAddress.trim()) {
       playBeep('error');
-      addToast('Chave PIX Aleatória de destino obrigatória!', 'error');
-      return;
-    }
-
-    // PIX KEY VALIDATION (UUID / EVP Random Format)
-    if (!isValidRandomPixKey(modalAddress)) {
-      playBeep('error');
-      addToast('Endereço de destino inválido! Formato obrigatório: Chave PIX Aleatória (ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c)', 'error');
+      addToast('Destino obrigatório!', 'error');
       return;
     }
 
@@ -614,11 +570,6 @@ export default function App() {
     setTimeout(async () => {
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
       const fiatEq = amountNum * modalSelectedCoin.price;
-
-      const newPortfolio = {
-        ...portfolio,
-        [modalSelectedCoin.symbol]: parseFloat((availableAmount - amountNum).toFixed(6))
-      };
 
       const newTx: Transaction = {
         id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -635,20 +586,19 @@ export default function App() {
 
       const newTxList = [newTx, ...transactions];
 
-      setPortfolio(newPortfolio);
       setTransactions(newTxList);
       setIsProcessingTx(false);
       setActiveModal(null);
       setTxSuccessInfo(newTx);
       playBeep('success');
-      addToast(`Transferência enviada! Gravada no histórico e enviada ao Admin para aprovação.`, 'success');
+      addToast(`Transferência enviada! Gravada no histórico e aguardando aprovação do Admin.`, 'success');
 
       if (isConnected) {
-        await uploadToFirestore(coins, newTxList, balanceFiat, newPortfolio);
+        await uploadToFirestore(coins, newTxList, balanceFiat, portfolio);
       }
       
       setTerminalLogs(prev => [...prev, 
-        `[${new Date().toLocaleTimeString()}] PIX-OUT: ${amountNum} ${modalSelectedCoin.symbol} (${modalSelectedBank}) -> ${modalAddress.substring(0,12)}... [PENDENTE]`
+        `[${new Date().toLocaleTimeString()}] ORDER-OUT: ${amountNum} ${modalSelectedCoin.symbol} (${modalSelectedBank}) -> ${modalAddress.trim()} [PENDENTE]`
       ]);
     }, 1200);
   };
@@ -673,14 +623,7 @@ export default function App() {
 
     if (!modalAddress.trim()) {
       playBeep('error');
-      addToast('Chave PIX Aleatória de destino obrigatória para recebimento do valor!', 'error');
-      return;
-    }
-
-    // PIX KEY VALIDATION (UUID / EVP Random Format)
-    if (!isValidRandomPixKey(modalAddress)) {
-      playBeep('error');
-      addToast('Endereço de destino inválido! Formato obrigatório: Chave PIX Aleatória (ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c)', 'error');
+      addToast('Destino obrigatório para recebimento do valor!', 'error');
       return;
     }
 
@@ -690,12 +633,6 @@ export default function App() {
     setTimeout(async () => {
       const sellValue = amountNum * modalSelectedCoin.price;
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
-
-      const newPortfolio = {
-        ...portfolio,
-        [modalSelectedCoin.symbol]: parseFloat((availableAmount - amountNum).toFixed(6))
-      };
-      const newBalance = parseFloat((balanceFiat + sellValue).toFixed(2));
 
       const newTx: Transaction = {
         id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -712,21 +649,19 @@ export default function App() {
 
       const newTxList = [newTx, ...transactions];
 
-      setPortfolio(newPortfolio);
-      setBalanceFiat(newBalance);
       setTransactions(newTxList);
       setIsProcessingTx(false);
       setActiveModal(null);
       setTxSuccessInfo(newTx);
       playBeep('success');
-      addToast(`Ordem de Venda registrada! Enviada ao histórico e para aprovação do Admin.`, 'success');
+      addToast(`Ordem de Venda registrada! Enviada ao histórico e aguardando aprovação do Admin.`, 'success');
 
       if (isConnected) {
-        await uploadToFirestore(coins, newTxList, newBalance, newPortfolio);
+        await uploadToFirestore(coins, newTxList, balanceFiat, portfolio);
       }
       
       setTerminalLogs(prev => [...prev, 
-        `[${new Date().toLocaleTimeString()}] SELL-ORDER: ${amountNum} ${modalSelectedCoin.symbol} -> PIX ${modalAddress.substring(0,10)}... [PENDENTE]`
+        `[${new Date().toLocaleTimeString()}] SELL-ORDER: ${amountNum} ${modalSelectedCoin.symbol} -> ${modalAddress.trim()} [PENDENTE]`
       ]);
     }, 1200);
   };
@@ -745,7 +680,7 @@ export default function App() {
     const totalCost = amountNum * modalSelectedCoin.price;
     if (totalCost > balanceFiat) {
       playBeep('error');
-      addToast('Saldo USD Fiat insuficiente!', 'error');
+      addToast('Saldo em R$ insuficiente para compra!', 'error');
       return;
     }
 
@@ -754,12 +689,6 @@ export default function App() {
 
     setTimeout(async () => {
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
-
-      const newBalance = parseFloat((balanceFiat - totalCost).toFixed(2));
-      const newPortfolio = {
-        ...portfolio,
-        [modalSelectedCoin.symbol]: parseFloat(((portfolio[modalSelectedCoin.symbol] || 0) + amountNum).toFixed(6))
-      };
 
       const newTx: Transaction = {
         id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -771,42 +700,36 @@ export default function App() {
         address: `PAGAMENTO BANCÁRIO (${modalSelectedBank})`,
         bankName: modalSelectedBank,
         hash: generatedHash,
-        status: 'SECURED_LOCAL'
+        status: 'PENDENTE'
       };
 
       const newTxList = [newTx, ...transactions];
 
-      setBalanceFiat(newBalance);
-      setPortfolio(newPortfolio);
       setTransactions(newTxList);
       setIsProcessingTx(false);
+      setActiveModal(null);
       setTxSuccessInfo(newTx);
       playBeep('success');
-      addToast(`Compra efetuada: -$${totalCost.toLocaleString('pt-BR', {minimumFractionDigits: 2})} via ${modalSelectedBank}.`, 'success');
+      addToast(`Ordem de Compra registrada! Aguardando aprovação do Admin.`, 'success');
 
       if (isConnected) {
-        await uploadToFirestore(coins, newTxList, newBalance, newPortfolio);
+        await uploadToFirestore(coins, newTxList, balanceFiat, portfolio);
       }
 
       setTerminalLogs(prev => [...prev, 
-        `[${new Date().toLocaleTimeString()}] BUY-ORDER: Comprou ${amountNum} ${modalSelectedCoin.symbol} por $${totalCost.toFixed(2)} (${modalSelectedBank})`
+        `[${new Date().toLocaleTimeString()}] BUY-ORDER: Solicitou ${amountNum} ${modalSelectedCoin.symbol} ($${totalCost.toFixed(2)}) [PENDENTE]`
       ]);
-    }, 1500);
+    }, 1200);
   };
 
   // Receive modal manual add
-  const handleSimulateReceiveFund = async () => {
+  const handleRequestReceiveFund = async () => {
     const receiveAmount = modalSelectedCoin.symbol === 'WMR' ? 1.0 : (modalSelectedCoin.symbol === 'DKBT' ? 0.05 : 5.0);
     const fiatValue = receiveAmount * modalSelectedCoin.price;
     const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
 
     playBeep('success');
-    addToast(`Recebimento efetuado via ${modalSelectedBank}: +${receiveAmount} ${modalSelectedCoin.symbol}`, 'success');
-
-    const newPortfolio = {
-      ...portfolio,
-      [modalSelectedCoin.symbol]: parseFloat(((portfolio[modalSelectedCoin.symbol] || 0) + receiveAmount).toFixed(6))
-    };
+    addToast(`Solicitação de Depósito de +${receiveAmount} ${modalSelectedCoin.symbol} enviada ao Administrador!`, 'info');
 
     const newTx: Transaction = {
       id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -815,24 +738,23 @@ export default function App() {
       coinSymbol: modalSelectedCoin.symbol,
       amount: receiveAmount,
       fiatValue: parseFloat(fiatValue.toFixed(2)),
-      address: `0xKALI_LOCAL_${modalSelectedCoin.symbol}_VAULT`,
+      address: `DEPÓSITO (${modalSelectedBank})`,
       bankName: modalSelectedBank,
       hash: generatedHash,
-      status: 'SECURED_LOCAL'
+      status: 'PENDENTE'
     };
 
     const newTxList = [newTx, ...transactions];
 
-    setPortfolio(newPortfolio);
     setTransactions(newTxList);
     setActiveModal(null);
 
     if (isConnected) {
-      await uploadToFirestore(coins, newTxList, balanceFiat, newPortfolio);
+      await uploadToFirestore(coins, newTxList, balanceFiat, portfolio);
     }
 
     setTerminalLogs(prev => [...prev, 
-      `[${new Date().toLocaleTimeString()}] TRANS-IN: Recebeu +${receiveAmount} ${modalSelectedCoin.symbol} (${modalSelectedBank})`
+      `[${new Date().toLocaleTimeString()}] DEPOSIT-REQ: +${receiveAmount} ${modalSelectedCoin.symbol} (${modalSelectedBank}) [PENDENTE]`
     ]);
   };
 
@@ -1872,10 +1794,10 @@ export default function App() {
                 </div>
 
                 <button
-                  onClick={handleSimulateReceiveFund}
+                  onClick={handleRequestReceiveFund}
                   className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded uppercase tracking-wider cursor-pointer"
                 >
-                  Simular Depósito de Fundos
+                  Solicitar Depósito de Fundos
                 </button>
               </div>
             )}
@@ -1921,34 +1843,17 @@ export default function App() {
 
                 {(activeModal === 'send' || activeModal === 'sell') && (
                   <div>
-                    <div className="flex justify-between items-center mb-1">
-                      <label className="block text-slate-400 text-[10px] uppercase font-bold">
-                        Chave PIX Aleatória de Destino (EVP/UUID):
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const sampleKey = generateSamplePixKey();
-                          setModalAddress(sampleKey);
-                          playBeep('click');
-                          addToast('Chave PIX Aleatória Válida gerada!', 'info');
-                        }}
-                        className="text-[10px] text-cyan-400 hover:text-cyan-300 font-mono font-bold flex items-center gap-1 cursor-pointer"
-                      >
-                        <Sparkles className="w-3 h-3 text-cyan-400" /> Gerar Chave PIX
-                      </button>
-                    </div>
+                    <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">
+                      Destino:
+                    </label>
                     <input
                       type="text"
                       value={modalAddress}
                       onChange={(e) => setModalAddress(e.target.value)}
-                      placeholder="ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c"
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded p-2.5 text-cyan-300 font-mono text-xs outline-none"
+                      placeholder=""
+                      className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded p-2.5 text-slate-100 font-mono text-xs outline-none"
                       required
                     />
-                    <p className="text-[9px] text-slate-500 font-mono mt-1">
-                      Formato aceito: Chave PIX Aleatória EVP (UUID v4 com 32 a 36 caracteres hexadecimais).
-                    </p>
                   </div>
                 )}
 
