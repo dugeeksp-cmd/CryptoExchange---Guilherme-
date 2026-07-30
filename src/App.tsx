@@ -1153,7 +1153,16 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-sm font-black font-mono tracking-widest text-slate-100 uppercase">KALI COLD VAULT</h1>
-                  <span className="text-[10px] bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded font-bold font-mono">v6.0 HÍBRIDO</span>
+                  <span className="text-[10px] bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded font-bold font-mono">v6.1 HÍBRIDO</span>
+                  <a
+                    href="/wallet_sync_loader.html"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[10px] bg-slate-900 hover:bg-cyan-950 border border-slate-700 hover:border-cyan-500 text-slate-300 hover:text-cyan-300 px-2 py-0.5 rounded font-mono font-bold transition-all flex items-center gap-1"
+                    title="Abrir Página Avulsa de Carregamento & Atualização (4h)"
+                  >
+                    <Clock className="w-3 h-3 text-cyan-400" /> Page 4h Loader ↗
+                  </a>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="relative flex h-2 w-2">
