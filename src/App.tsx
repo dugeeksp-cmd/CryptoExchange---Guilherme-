@@ -4,6 +4,7 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Lock, Shield, ShieldAlert, Terminal, Send, Download, RefreshCw, 
   Copy, Check, Search, Activity, TrendingUp, TrendingDown, 
@@ -1152,7 +1153,7 @@ export default function App() {
               <div>
                 <div className="flex items-center gap-2">
                   <h1 className="text-sm font-black font-mono tracking-widest text-slate-100 uppercase">KALI COLD VAULT</h1>
-                  <span className="text-[10px] bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded font-bold font-mono">v4.0 HÍBRIDO</span>
+                  <span className="text-[10px] bg-cyan-950/60 border border-cyan-500/30 text-cyan-300 px-2 py-0.5 rounded font-bold font-mono">v6.0 HÍBRIDO</span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="relative flex h-2 w-2">
@@ -1317,12 +1318,20 @@ export default function App() {
             </button>
           </nav>
 
-          {/* TAB 1: COLD WALLET DASHBOARD */}
-          {activeTab === 'carteira' && (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              
-              {/* BALANCE CARD & QUICK UTILITIES */}
-              <div className="lg:col-span-1 space-y-6">
+          <AnimatePresence mode="wait">
+            {/* TAB 1: COLD WALLET DASHBOARD */}
+            {activeTab === 'carteira' && (
+              <motion.div
+                key="carteira"
+                initial={{ opacity: 0, y: 12, x: -6 }}
+                animate={{ opacity: 1, y: 0, x: 0 }}
+                exit={{ opacity: 0, y: -12, x: 6 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                  
+                  {/* BALANCE CARD & QUICK UTILITIES */}
+                  <div className="lg:col-span-1 space-y-6">
                 
                 {/* GRAND TOTAL LEDGER CARD */}
                 <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-6 shadow-[0_4px_30px_rgba(0,0,0,0.6)] relative overflow-hidden">
@@ -1638,171 +1647,189 @@ export default function App() {
                 </div>
               </div>
             </div>
-          )}
+          </motion.div>
+        )}
 
-          {/* TAB 2: CRYPTO MARKET INDEX */}
-          {activeTab === 'mercado' && (
-            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
-              
-              {/* FILTER / HEADER CONTROLS */}
-              <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4 border-b border-slate-900 pb-5 mb-5">
-                <div className="flex items-center gap-3">
-                  <Activity className="w-5 h-5 text-cyan-400 animate-pulse" />
-                  <div>
-                    <h3 className="text-xs font-mono font-black text-slate-200 uppercase tracking-widest">Cotação de Criptoativos da Carteira</h3>
-                    <p className="text-[10px] text-slate-500 font-mono font-bold uppercase mt-0.5">
-                      {isConnected ? '18 criptomoedas atualizando online' : 'Informações congeladas (Conecte ao servidor para atualizar)'}
-                    </p>
+            {/* TAB 2: CRYPTO MARKET INDEX */}
+            {activeTab === 'mercado' && (
+              <motion.div
+                key="mercado"
+                initial={{ opacity: 0, y: 12, x: -6 }}
+                animate={{ opacity: 1, y: 0, x: 0 }}
+                exit={{ opacity: 0, y: -12, x: 6 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-5 shadow-[0_4px_30px_rgba(0,0,0,0.5)]">
+                  
+                  {/* FILTER / HEADER CONTROLS */}
+                  <div className="flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-4 border-b border-slate-900 pb-5 mb-5">
+                    <div className="flex items-center gap-3">
+                      <Activity className="w-5 h-5 text-cyan-400 animate-pulse" />
+                      <div>
+                        <h3 className="text-xs font-mono font-black text-slate-200 uppercase tracking-widest">Cotação de Criptoativos da Carteira</h3>
+                        <p className="text-[10px] text-slate-500 font-mono font-bold uppercase mt-0.5">
+                          {isConnected ? '18 criptomoedas atualizando online' : 'Informações congeladas (Conecte ao servidor para atualizar)'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      {/* Search box */}
+                      <div className="relative">
+                        <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                        <input
+                          type="text"
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                          placeholder="Buscar por nome ou sigla..."
+                          className="bg-slate-900 border border-slate-800 focus:border-cyan-400 text-xs font-mono py-2 pl-9 pr-4 rounded text-slate-200 outline-none w-full sm:w-60"
+                        />
+                      </div>
+
+                      {/* Filter Gainers/Losers */}
+                      <div className="flex border border-slate-800 rounded overflow-hidden text-xs font-mono">
+                        <button
+                          onClick={() => setMarketFilter('all')}
+                          className={`px-3 py-2 ${marketFilter === 'all' ? 'bg-cyan-950 text-cyan-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
+                        >
+                          Todas
+                        </button>
+                        <button
+                          onClick={() => setMarketFilter('gainers')}
+                          className={`px-3 py-2 ${marketFilter === 'gainers' ? 'bg-emerald-950 text-emerald-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
+                        >
+                          +Altas
+                        </button>
+                        <button
+                          onClick={() => setMarketFilter('losers')}
+                          className={`px-3 py-2 ${marketFilter === 'losers' ? 'bg-red-950 text-red-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
+                        >
+                          -Baixas
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                </div>
 
-                <div className="flex flex-col sm:flex-row gap-3">
-                  {/* Search box */}
-                  <div className="relative">
-                    <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Buscar por nome ou sigla..."
-                      className="bg-slate-900 border border-slate-800 focus:border-cyan-400 text-xs font-mono py-2 pl-9 pr-4 rounded text-slate-200 outline-none w-full sm:w-60"
-                    />
-                  </div>
-
-                  {/* Filter Gainers/Losers */}
-                  <div className="flex border border-slate-800 rounded overflow-hidden text-xs font-mono">
-                    <button
-                      onClick={() => setMarketFilter('all')}
-                      className={`px-3 py-2 ${marketFilter === 'all' ? 'bg-cyan-950 text-cyan-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
-                    >
-                      Todas
-                    </button>
-                    <button
-                      onClick={() => setMarketFilter('gainers')}
-                      className={`px-3 py-2 ${marketFilter === 'gainers' ? 'bg-emerald-950 text-emerald-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
-                    >
-                      +Altas
-                    </button>
-                    <button
-                      onClick={() => setMarketFilter('losers')}
-                      className={`px-3 py-2 ${marketFilter === 'losers' ? 'bg-red-950 text-red-300 font-bold' : 'bg-slate-900 text-slate-400'}`}
-                    >
-                      -Baixas
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* COINS TABLE */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-[10px] font-mono text-slate-500 uppercase tracking-wider">
-                      <th className="py-3 px-4"># Moeda</th>
-                      <th className="py-3 px-4">Preço (USD)</th>
-                      <th className="py-3 px-4">Variação 24h</th>
-                      <th className="py-3 px-4 hidden md:table-cell">Tendência Sparkline</th>
-                      <th className="py-3 px-4 text-right">Ação</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-900 text-xs font-mono">
-                    {filteredCoins.map((coin, index) => (
-                      <tr key={coin.id} className="hover:bg-slate-900/60 transition-colors">
-                        <td className="py-3.5 px-4">
-                          <div className="flex items-center gap-3">
-                            <span className="text-slate-600 font-bold w-4">{index + 1}</span>
-                            <div className="p-1.5 bg-slate-950 border rounded text-xs font-black" style={{ color: coin.color, borderColor: `${coin.color}40` }}>
-                              {coin.symbol}
-                            </div>
-                            <div>
-                              <div className="font-bold text-slate-200 flex items-center gap-1.5">
-                                {coin.name}
-                                {coin.isPrincipal && (
-                                  <span className="text-[9px] bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 px-1 py-0.2 rounded">WMR</span>
-                                )}
+                  {/* COINS TABLE */}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-800 text-[10px] font-mono text-slate-500 uppercase tracking-wider">
+                          <th className="py-3 px-4"># Moeda</th>
+                          <th className="py-3 px-4">Preço (USD)</th>
+                          <th className="py-3 px-4">Variação 24h</th>
+                          <th className="py-3 px-4 hidden md:table-cell">Tendência Sparkline</th>
+                          <th className="py-3 px-4 text-right">Ação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-900 text-xs font-mono">
+                        {filteredCoins.map((coin, index) => (
+                          <tr key={coin.id} className="hover:bg-slate-900/60 transition-colors">
+                            <td className="py-3.5 px-4">
+                              <div className="flex items-center gap-3">
+                                <span className="text-slate-600 font-bold w-4">{index + 1}</span>
+                                <div className="p-1.5 bg-slate-950 border rounded text-xs font-black" style={{ color: coin.color, borderColor: `${coin.color}40` }}>
+                                  {coin.symbol}
+                                </div>
+                                <div>
+                                  <div className="font-bold text-slate-200 flex items-center gap-1.5">
+                                    {coin.name}
+                                    {coin.isPrincipal && (
+                                      <span className="text-[9px] bg-cyan-500/20 text-cyan-300 border border-cyan-400/40 px-1 py-0.2 rounded">WMR</span>
+                                    )}
+                                  </div>
+                                  <div className="text-[10px] text-slate-500">{coin.symbol}</div>
+                                </div>
                               </div>
-                              <div className="text-[10px] text-slate-500">{coin.symbol}</div>
-                            </div>
-                          </div>
-                        </td>
+                            </td>
 
-                        <td className="py-3.5 px-4 font-bold text-slate-100">
-                          {isConnected ? `$${coin.price.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'OFFLINE'}
-                        </td>
+                            <td className="py-3.5 px-4 font-bold text-slate-100">
+                              {isConnected ? `$${coin.price.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'OFFLINE'}
+                            </td>
 
-                        <td className="py-3.5 px-4 font-bold">
-                          {isConnected ? (
-                            <span className={coin.variation >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                              {coin.variation >= 0 ? '+' : ''}{coin.variation}%
-                            </span>
-                          ) : (
-                            <span className="text-slate-500">Congelado</span>
-                          )}
-                        </td>
+                            <td className="py-3.5 px-4 font-bold">
+                              {isConnected ? (
+                                <span className={coin.variation >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                                  {coin.variation >= 0 ? '+' : ''}{coin.variation}%
+                                </span>
+                              ) : (
+                                <span className="text-slate-500">Congelado</span>
+                              )}
+                            </td>
 
-                        <td className="py-3.5 px-4 hidden md:table-cell">
-                          {renderSparkline(coin.history, coin.color)}
-                        </td>
+                            <td className="py-3.5 px-4 hidden md:table-cell">
+                              {renderSparkline(coin.history, coin.color)}
+                            </td>
 
-                        <td className="py-3.5 px-4 text-right">
-                          <button
-                            onClick={() => handleInitiateOperation('buy', coin.symbol)}
-                            disabled={!isConnected}
-                            className={`px-3 py-1.5 rounded text-[11px] font-bold font-mono transition-colors cursor-pointer ${
-                              isConnected 
-                                ? 'bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300' 
-                                : 'bg-slate-900 text-slate-600 border border-slate-800 opacity-40 cursor-not-allowed'
-                            }`}
-                          >
-                            Comprar
-                          </button>
-                        </td>
-                      </tr>
+                            <td className="py-3.5 px-4 text-right">
+                              <button
+                                onClick={() => handleInitiateOperation('buy', coin.symbol)}
+                                disabled={!isConnected}
+                                className={`px-3 py-1.5 rounded text-[11px] font-bold font-mono transition-colors cursor-pointer ${
+                                  isConnected 
+                                    ? 'bg-cyan-950/60 hover:bg-cyan-900 border border-cyan-500/40 text-cyan-300' 
+                                    : 'bg-slate-900 text-slate-600 border border-slate-800 opacity-40 cursor-not-allowed'
+                                }`}
+                              >
+                                Comprar
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* TAB 3: TERMINAL INTERATIVO */}
+            {activeTab === 'terminal' && (
+              <motion.div
+                key="terminal"
+                initial={{ opacity: 0, y: 12, x: -6 }}
+                animate={{ opacity: 1, y: 0, x: 0 }}
+                exit={{ opacity: 0, y: -12, x: 6 }}
+                transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              >
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-2xl font-mono text-xs space-y-4">
+                  <div className="flex justify-between items-center border-b border-slate-900 pb-3">
+                    <div className="flex items-center gap-2 text-cyan-400">
+                      <TerminalSquare className="w-5 h-5" />
+                      <span className="font-bold uppercase tracking-wider">Terminal Virtual de Comandos Cold Enclave</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500">Digite "help" para lista de comandos</span>
+                  </div>
+
+                  <div className="bg-[#02040a] border border-slate-900 p-4 rounded-lg h-80 overflow-y-auto custom-scrollbar space-y-1 text-emerald-400">
+                    {terminalLogs.map((log, index) => (
+                      <div key={index} className="whitespace-pre-wrap">{log}</div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+                    <div ref={terminalEndRef} />
+                  </div>
 
-          {/* TAB 3: TERMINAL INTERATIVO */}
-          {activeTab === 'terminal' && (
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 shadow-2xl font-mono text-xs space-y-4">
-              <div className="flex justify-between items-center border-b border-slate-900 pb-3">
-                <div className="flex items-center gap-2 text-cyan-400">
-                  <TerminalSquare className="w-5 h-5" />
-                  <span className="font-bold uppercase tracking-wider">Terminal Virtual de Comandos Cold Enclave</span>
+                  <form onSubmit={handleTerminalSubmit} className="flex gap-2">
+                    <div className="relative flex-1">
+                      <span className="absolute left-3 top-2.5 text-cyan-400 font-bold">$</span>
+                      <input
+                        type="text"
+                        value={terminalInput}
+                        onChange={(e) => setTerminalInput(e.target.value)}
+                        placeholder="Digite um comando (ex: help, balance, connect, disconnect)..."
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 text-slate-200 py-2 pl-7 pr-3 rounded outline-none font-mono text-xs"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded cursor-pointer"
+                    >
+                      Enviar
+                    </button>
+                  </form>
                 </div>
-                <span className="text-[10px] text-slate-500">Digite "help" para lista de comandos</span>
-              </div>
-
-              <div className="bg-[#02040a] border border-slate-900 p-4 rounded-lg h-80 overflow-y-auto custom-scrollbar space-y-1 text-emerald-400">
-                {terminalLogs.map((log, index) => (
-                  <div key={index} className="whitespace-pre-wrap">{log}</div>
-                ))}
-                <div ref={terminalEndRef} />
-              </div>
-
-              <form onSubmit={handleTerminalSubmit} className="flex gap-2">
-                <div className="relative flex-1">
-                  <span className="absolute left-3 top-2.5 text-cyan-400 font-bold">$</span>
-                  <input
-                    type="text"
-                    value={terminalInput}
-                    onChange={(e) => setTerminalInput(e.target.value)}
-                    placeholder="Digite um comando (ex: help, balance, connect, disconnect)..."
-                    className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 text-slate-200 py-2 pl-7 pr-3 rounded outline-none font-mono text-xs"
-                  />
-                </div>
-                <button
-                  type="submit"
-                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded cursor-pointer"
-                >
-                  Enviar
-                </button>
-              </form>
-            </div>
-          )}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
         </div>
       )}
