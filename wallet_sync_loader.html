@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kali Cold Vault - Atualização de Carteira (4 Horas)</title>
+  <title>Kali Cold Vault - Wallet Synchronization (4 Hours)</title>
   <style>
     :root {
       --bg-color: #02040a;
@@ -45,7 +45,7 @@
       width: 100%;
       display: flex;
       justify-content: space-between;
-      items: center;
+      align-items: center;
       padding-bottom: 1rem;
       border-bottom: 1px solid var(--border);
     }
@@ -163,7 +163,7 @@
       font-weight: bold;
     }
 
-    /* 4-Hour Progress Section */
+    /* Progress Section */
     .sync-card {
       background: rgba(7, 12, 24, 0.9);
       border: 1px solid rgba(0, 240, 255, 0.3);
@@ -239,40 +239,6 @@
       font-size: 0.95rem;
       font-weight: 800;
       color: #fff;
-    }
-
-    /* Simulation Control Buttons */
-    .controls-bar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-      padding-top: 0.5rem;
-      border-t: 1px dashed var(--border);
-      align-items: center;
-    }
-
-    .ctrl-btn {
-      background: #0f172a;
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      font-size: 0.65rem;
-      font-weight: 700;
-      padding: 0.35rem 0.65rem;
-      border-radius: 0.25rem;
-      cursor: pointer;
-      transition: all 0.2s;
-    }
-
-    .ctrl-btn:hover {
-      border-color: var(--cyan);
-      color: var(--cyan);
-      background: rgba(0, 240, 255, 0.05);
-    }
-
-    .ctrl-btn.active {
-      background: var(--cyan-dim);
-      border-color: var(--cyan);
-      color: var(--cyan);
     }
 
     /* Password Modal */
@@ -405,12 +371,12 @@
       <div class="brand-logo">K</div>
       <div>
         <div class="brand-title">KALI SECURE COLD VAULT</div>
-        <div class="brand-subtitle">PÁGINA AVULSA DE SINCRONIZAÇÃO E ATUALIZAÇÃO</div>
+        <div class="brand-subtitle">COLD STORAGE WALLET SYNCHRONIZATION</div>
       </div>
     </div>
     <div class="status-badge">
       <span class="dot-ping"></span>
-      <span>MODO OFFLINE ATIVO</span>
+      <span>OFFLINE MODE ACTIVE</span>
     </div>
   </header>
 
@@ -418,7 +384,7 @@
     <!-- Terminal Boot Logs Box -->
     <div class="terminal-box">
       <div class="terminal-header">
-        <span>LOGS DO SISTEMA DE ENCLAVE</span>
+        <span>ENCLAVE SYSTEM BOOT LOGS</span>
         <span id="clock-display">00:00:00</span>
       </div>
       <div class="logs-container" id="logs-container">
@@ -429,12 +395,12 @@
     <!-- 4-Hour Progress Card -->
     <div class="sync-card">
       <div class="sync-title">
-        <span>Atualização de Carteira & Validação de Blocos</span>
-        <span class="time-badge">DURAÇÃO ESTIMADA: 4 HORAS</span>
+        <span>WALLET DATA UPDATE & BLOCK VALIDATION</span>
+        <span class="time-badge">ESTIMATED DURATION: 4 HOURS</span>
       </div>
 
       <div style="font-size: 0.7rem; color: #94a3b8; line-height: 1.4;">
-        Mantenha esta página aberta durante as 4 horas para concluir a atualização criptográfica completa dos dados da carteira.
+        Keep this page open during the 4-hour countdown to complete the full cryptographic update of your wallet state.
       </div>
 
       <!-- Progress Bar -->
@@ -445,27 +411,17 @@
       <!-- Stats Grid -->
       <div class="stats-grid">
         <div class="stat-box">
-          <div class="stat-label">Progresso Total</div>
+          <div class="stat-label">TOTAL PROGRESS</div>
           <div class="stat-value" id="percent-val" style="color: var(--cyan);">0.00%</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">Tempo Restante</div>
+          <div class="stat-label">REMAINING TIME</div>
           <div class="stat-value" id="timer-val" style="color: var(--amber);">04:00:00</div>
         </div>
         <div class="stat-box">
-          <div class="stat-label">Blocos Processados</div>
+          <div class="stat-label">PROCESSED BLOCKS</div>
           <div class="stat-value" id="blocks-val" style="color: var(--emerald);">0 / 14,400</div>
         </div>
-      </div>
-
-      <!-- Testing Controls -->
-      <div class="controls-bar">
-        <span style="font-size: 0.65rem; color: var(--text-muted); font-weight: bold;">VELOCIDADE DE SIMULAÇÃO:</span>
-        <button class="ctrl-btn active" id="spd-1" onclick="setSpeed(1)">1x (Real 4h)</button>
-        <button class="ctrl-btn" id="spd-60" onclick="setSpeed(60)">60x (4 min)</button>
-        <button class="ctrl-btn" id="spd-3600" onclick="setSpeed(3600)">3600x (4 seg)</button>
-        <button class="ctrl-btn" onclick="jumpTo(99.5)">Acelerar 99%</button>
-        <button class="ctrl-btn" style="color: var(--emerald); border-color: rgba(16,185,129,0.4);" onclick="finishSync()">Concluir Agora</button>
       </div>
     </div>
   </main>
@@ -475,8 +431,8 @@
     <div class="modal-card">
       <div class="modal-icon">🔒</div>
       <div>
-        <h3 style="font-size: 1.1rem; color: var(--cyan); font-weight: 900; margin-bottom: 0.25rem;">CARTEIRA ATUALIZADA COM SUCESSO</h3>
-        <p style="font-size: 0.7rem; color: #94a3b8;">Insira sua senha / chave AES para autenticar e acessar a carteira</p>
+        <h3 style="font-size: 1.1rem; color: var(--cyan); font-weight: 900; margin-bottom: 0.25rem;">WALLET UPDATED SUCCESSFULLY</h3>
+        <p style="font-size: 0.7rem; color: #94a3b8;">Enter your PIN / AES Key to authenticate and access your wallet</p>
       </div>
 
       <input type="password" class="pass-input" id="pass-input" placeholder="••••••••" readonly>
@@ -491,33 +447,33 @@
         <button class="key-btn" onclick="pressKey('7')">7</button>
         <button class="key-btn" onclick="pressKey('8')">8</button>
         <button class="key-btn" onclick="pressKey('9')">9</button>
-        <button class="key-btn" style="color: var(--rose); font-size: 0.75rem;" onclick="clearPass()">LIMPAR</button>
+        <button class="key-btn" style="color: var(--rose); font-size: 0.75rem;" onclick="clearPass()">CLEAR</button>
         <button class="key-btn" onclick="pressKey('0')">0</button>
         <button class="key-btn" style="color: var(--amber); font-size: 0.75rem;" onclick="delPass()">DEL</button>
       </div>
 
-      <button class="submit-btn" onclick="verifyPassword()">AUTENTICAR ASSINATURA</button>
+      <button class="submit-btn" onclick="verifyPassword()">AUTHENTICATE SIGNATURE</button>
       
       <div id="modal-msg" style="font-size: 0.75rem; font-weight: bold; display: none;"></div>
     </div>
   </div>
 
   <footer>
-    KALI COLD VAULT OS • PÁGINA STANDALONE DE SINCRONIZAÇÃO • FUNCIONA OFFLINE
+    KALI COLD VAULT OS • STANDALONE SYNCHRONIZATION PAGE • OPERATES OFFLINE
   </footer>
 
   <script>
-    // System Boot Texts
+    // System Boot Logs
     const bootSteps = [
-      'KALI_SECURE_OS CORE INIT (v5.0.0-isolated)...',
+      'KALI_SECURE_OS CORE INIT (v6.2.0-isolated)...',
       '-> Verifying bootloader signature... [OK]',
       '-> Initializing cryptographic offline key store...',
       '-> SECP256K1 key storage integrity: APPROVED',
       '-> Mounting sandbox cold file system partition... [/dev/sdb1]',
       '-> PRIMARY ASSET ATTACHED: WMR TOKEN (WMR)',
-      '[✓] ONLINE CONNECTION INITIALIZED',
-      '-> Mode status: OFFLINE (FROZEN UNTIL CONNECTED)',
-      'Ready for user security key input.'
+      '-> STARTING WALLET DATA RE-SYNCHRONIZATION & BLOCK VALIDATION...',
+      '-> Status: UPDATING (EXPECTED DURATION: 04:00:00)',
+      '-> Please keep this page open until the update finishes.'
     ];
 
     const logsContainer = document.getElementById('logs-container');
@@ -560,10 +516,9 @@
     }
     setTimeout(renderNextBootStep, 200);
 
-    // 4-Hour Progress Logic (14,400 seconds)
+    // 4-Hour Countdown Logic (14,400 seconds)
     const TOTAL_SECONDS = 14400;
     let elapsedSeconds = 0;
-    let speedMultiplier = 1;
     let timerInterval = null;
 
     const progressFill = document.getElementById('progress-fill');
@@ -597,30 +552,12 @@
     function startTimer() {
       if (timerInterval) clearInterval(timerInterval);
       timerInterval = setInterval(() => {
-        elapsedSeconds += (1 * speedMultiplier);
+        elapsedSeconds += 1;
         if (elapsedSeconds >= TOTAL_SECONDS) {
           elapsedSeconds = TOTAL_SECONDS;
         }
         updateProgressUI();
       }, 1000);
-    }
-
-    function setSpeed(spd) {
-      speedMultiplier = spd;
-      document.querySelectorAll('.ctrl-btn').forEach(btn => btn.classList.remove('active'));
-      if (spd === 1) document.getElementById('spd-1').classList.add('active');
-      if (spd === 60) document.getElementById('spd-60').classList.add('active');
-      if (spd === 3600) document.getElementById('spd-3600').classList.add('active');
-    }
-
-    function jumpTo(targetPercent) {
-      elapsedSeconds = (targetPercent / 100) * TOTAL_SECONDS;
-      updateProgressUI();
-    }
-
-    function finishSync() {
-      elapsedSeconds = TOTAL_SECONDS;
-      updateProgressUI();
     }
 
     function triggerCompletionModal() {
@@ -652,17 +589,17 @@
       if (passInput.value.length === 0) {
         modalMsg.style.display = 'block';
         modalMsg.style.color = 'var(--rose)';
-        modalMsg.textContent = 'Por favor, insira sua senha de acesso.';
+        modalMsg.textContent = 'Please enter your password / PIN to proceed.';
         return;
       }
 
       playAudioBeep(1800, 0.1);
       modalMsg.style.display = 'block';
       modalMsg.style.color = 'var(--emerald)';
-      modalMsg.textContent = '[✓] ASSINATURA AUTENTICADA COM SUCESSO! CARTEIRA ATUALIZADA.';
+      modalMsg.textContent = '[✓] SIGNATURE AUTHENTICATED SUCCESSFULLY! WALLET UPDATED.';
       
       setTimeout(() => {
-        alert('Carteira sincronizada e liberada com sucesso!');
+        alert('Wallet synchronized and unlocked successfully!');
       }, 500);
     }
 
