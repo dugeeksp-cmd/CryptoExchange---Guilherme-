@@ -1327,6 +1327,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
                   </div>
                 </div>
 
+                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                  <label className="block text-xs font-mono text-emerald-400 font-bold">
+                    Liberação de Atualização da Versão da Carteira (index.html Offline):
+                  </label>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setMarketSettings({ ...marketSettings, updateAvailable: !marketSettings.updateAvailable })}
+                      className={`px-4 py-2.5 rounded-lg font-mono text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border ${
+                        marketSettings.updateAvailable 
+                          ? 'bg-emerald-950 text-emerald-300 border-emerald-500 shadow-md shadow-emerald-950/50' 
+                          : 'bg-slate-900 text-slate-400 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <RefreshCw className={`w-4 h-4 ${marketSettings.updateAvailable ? 'text-emerald-400 animate-spin' : ''}`} />
+                      {marketSettings.updateAvailable ? 'LIBERADO (Botão "Atualizar Versão" Ativo no Header)' : 'BLOQUEADO (Botão Inativo)'}
+                    </button>
+                    <p className="text-[11px] text-slate-400 font-mono">
+                      Quando ativado pelo Admin, o usuário poderá clicar no botão de atualização da versão na carteira para atualizar localmente a versão do arquivo index.html.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="pt-2">
                   <button
                     type="submit"

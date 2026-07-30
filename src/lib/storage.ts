@@ -27,7 +27,8 @@ export const DEFAULT_MARKET_SETTINGS: MarketSettings = {
   preset: 'Neutro',
   trend: 'neutro',
   updateSpeedMs: 10000,
-  lastUpdated: new Date().toISOString()
+  lastUpdated: new Date().toISOString(),
+  updateAvailable: false
 };
 
 export const storage = {

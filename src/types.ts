@@ -46,6 +46,7 @@ export interface MarketSettings {
   trend: 'alta' | 'baixa' | 'neutro' | 'aleatorio';
   updateSpeedMs: number;
   lastUpdated?: string;
+  updateAvailable?: boolean;
 }
 
 export interface SyncLog {

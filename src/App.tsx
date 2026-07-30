@@ -166,9 +166,14 @@ export default function App() {
   const terminalEndRef = useRef<HTMLDivElement>(null);
   const bootLogsEndRef = useRef<HTMLDivElement>(null);
 
-  // Boot screen specific logs
+  // Boot screen specific logs (ENGLISH ONLY)
   const [bootLogs, setBootLogs] = useState<string[]>([]);
   const [bootStep, setBootStep] = useState<number>(0);
+  const [updateAvailable, setUpdateAvailable] = useState<boolean>(false);
+
+  // Send modal specific options
+  const [sendMode, setSendMode] = useState<'crypto' | 'bank'>('crypto');
+  const [sendBrokerage, setSendBrokerage] = useState<'standard' | 'express' | 'instant'>('standard');
 
   // Sound Synthesizer function using Web Audio API
   const playBeep = (type: 'click' | 'success' | 'error' | 'boot' | 'keystroke') => {
@@ -245,6 +250,8 @@ export default function App() {
       setCoins(storage.loadCoins(INITIAL_COINS));
       setTransactions(storage.loadTransactions(INITIAL_TRANSACTIONS));
       setLastSyncTimestamp(storage.loadLastSyncTime());
+      const mkt = storage.loadMarketSettings();
+      setUpdateAvailable(!!mkt.updateAvailable);
     } catch (e) {
       console.warn('localStorage read error:', e);
     }
@@ -258,20 +265,20 @@ export default function App() {
     storage.saveTransactions(transactions);
   }, [balanceFiat, portfolio, coins, transactions]);
 
-  // Handle Boot logs sequence loading
+  // Handle Boot logs sequence loading (ENGLISH ONLY)
   useEffect(() => {
     if (currentScreen !== 'boot') return;
     
     const bootSteps = [
-      { t: 'KALI_SECURE_OS CORE INIT (v3.2.0-isolated)...', d: 300 },
+      { t: 'KALI_SECURE_OS CORE INIT (v5.0.0-isolated)...', d: 300 },
       { t: '-> Verifying bootloader signature... [OK]', d: 250 },
       { t: '-> Initializing cryptographic offline key store...', d: 350 },
       { t: '-> SECP256K1 key storage integrity: APPROVED', d: 200 },
       { t: '-> Mounting sandbox cold file system partition... [/dev/sdb1]', d: 400 },
-      { t: '-> PRINCIPAL ASSET ATTACHED: WMR TOKEN (WMR)', d: 300 },
-      { t: '[✓] CONEXÃO ONLINE INICIALIZADA', d: 250 },
+      { t: '-> PRIMARY ASSET ATTACHED: WMR TOKEN (WMR)', d: 300 },
+      { t: '[✓] ONLINE CONNECTION INITIALIZED', d: 250 },
       { t: '-> Mode status: OFFLINE (FROZEN UNTIL CONNECTED)', d: 300 },
-      { t: 'Pronto para entrada de chave de segurança do usuário.', d: 100 }
+      { t: 'Ready for user security key input.', d: 100 }
     ];
 
     if (bootStep < bootSteps.length) {
@@ -305,13 +312,6 @@ export default function App() {
           return calculateCoinOscillation(coin, mktSettings);
         });
       });
-      
-      if (Math.random() < 0.2) {
-        setTerminalLogs((prev) => [
-          ...prev.slice(-30), 
-          `[${new Date().toLocaleTimeString()}] SINCRONIZAÇÃO ONLINE: Preços e gráfico oscilados (Preset: ${mktSettings.preset})`
-        ]);
-      }
     }, intervalMs);
 
     return () => clearInterval(interval);
@@ -355,10 +355,12 @@ export default function App() {
       setBalanceFiat(remote.balanceFiat);
       setPortfolio(remote.portfolio);
       setLastSyncTimestamp(remote.lastSyncTimestamp);
+      const mkt = storage.loadMarketSettings();
+      setUpdateAvailable(!!mkt.updateAvailable);
       setIsConnected(true);
       playBeep('success');
       addToast('Conectado ao servidor! Dados e cotações sincronizados.', 'success');
-      setTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SERVIDOR REMOTO CONECTADO`]);
+      setTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] REMOTE SERVER CONNECTED - SECURE HANDSHAKE COMPLETED`]);
     } catch (err) {
       console.error(err);
       playBeep('error');
@@ -378,7 +380,7 @@ export default function App() {
       setIsConnected(false);
       playBeep('click');
       addToast('Desconectado. Modo Offline ativado (Informações congeladas).', 'info');
-      setTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] DESCONECTADO DO SERVIDOR - Preços e valores congelados`]);
+      setTerminalLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] SERVER DISCONNECTED - LOCAL COLD ENCLAVE FROZEN`]);
     } catch (err) {
       console.warn(err);
       setIsConnected(false);
@@ -521,6 +523,19 @@ export default function App() {
     );
   };
 
+  // Constants for brokerages
+  const BROKERAGE_OPTIONS_SEND = [
+    { id: 'standard', name: 'Standard Brokerage', deadline: 'Prazo: 2 dias', fee: 'Taxa: 0,5%' },
+    { id: 'express', name: 'Express Brokerage', deadline: 'Prazo: 1 dia', fee: 'Taxa: 15%' },
+    { id: 'instant', name: 'Instant Vault Brokerage', deadline: 'Prazo: 3 horas', fee: 'Taxa: 35%' }
+  ];
+
+  const SELL_BROKERAGES = [
+    'CryptoExchange Prime (Liquidez OTC Instantânea)',
+    'Nexus Global Brokerage (Execução Direta)',
+    'Apex Quantum Capital (Conversão Express)'
+  ];
+
   // Copy helper
   const handleCopyToClipboard = (text: string, label: string) => {
     navigator.clipboard.writeText(text);
@@ -528,14 +543,38 @@ export default function App() {
     addToast(`${label} copiado para a área de transferência!`, 'success');
   };
 
+  // Version Update Local Handler
+  const handleUpdateWalletVersion = () => {
+    if (!updateAvailable) return;
+    playBeep('success');
+    addToast('Atualização de versão efetuada com sucesso! Código index.html atualizado localmente para v5.0.', 'success');
+    setTerminalLogs(prev => [
+      ...prev,
+      `[${new Date().toLocaleTimeString()}] [VERSION UPDATE] Local codebase index.html updated to v5.0.0-PROD.`
+    ]);
+  };
+
   // Open modal inner setup
   const openModal = (type: 'receive' | 'send' | 'sell' | 'buy', coinSymbol?: string) => {
     playBeep('click');
-    const coin = coins.find((c) => c.symbol === (coinSymbol || 'WMR')) || coins[0];
-    setModalSelectedCoin(coin);
-    setModalSelectedBank(BANK_OPTIONS[0]);
+    if (type === 'sell') {
+      const nonZeroCoins = coins.filter(c => (portfolio[c.symbol] || 0) > 0);
+      const coin = nonZeroCoins.find(c => c.symbol === coinSymbol) || nonZeroCoins[0] || coins[0];
+      setModalSelectedCoin(coin);
+      setModalSelectedBank(SELL_BROKERAGES[0]);
+    } else {
+      const coin = coins.find((c) => c.symbol === (coinSymbol || 'WMR')) || coins[0];
+      setModalSelectedCoin(coin);
+      setModalSelectedBank(BANK_OPTIONS[0]);
+    }
+    setSendMode('crypto');
+    setSendBrokerage('standard');
     setModalAmount('');
-    setModalAddress('');
+    if (type === 'receive') {
+      setModalAddress(`0xKALI_LOCAL_${(coinSymbol || 'WMR')}_VAULT`);
+    } else {
+      setModalAddress('');
+    }
     setTxSuccessInfo(null);
     setActiveModal(type);
   };
@@ -564,12 +603,26 @@ export default function App() {
       return;
     }
 
+    if (sendMode === 'crypto') {
+      if (!isValidRandomPixKey(modalAddress.trim())) {
+        playBeep('error');
+        addToast('Endereço de destino inválido! Formato obrigatório: Chave PIX Aleatória (ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c)', 'error');
+        return;
+      }
+    }
+
     setIsProcessingTx(true);
     playBeep('click');
 
     setTimeout(async () => {
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
       const fiatEq = amountNum * modalSelectedCoin.price;
+
+      let bankInfo = 'Carteira Cripto Externa';
+      if (sendMode === 'bank') {
+        const brok = BROKERAGE_OPTIONS_SEND.find(b => b.id === sendBrokerage) || BROKERAGE_OPTIONS_SEND[0];
+        bankInfo = `${brok.name} (${brok.deadline} - ${brok.fee})`;
+      }
 
       const newTx: Transaction = {
         id: `TX-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -579,7 +632,7 @@ export default function App() {
         amount: amountNum,
         fiatValue: parseFloat(fiatEq.toFixed(2)),
         address: modalAddress.trim(),
-        bankName: modalSelectedBank,
+        bankName: bankInfo,
         hash: generatedHash,
         status: 'PENDENTE'
       };
@@ -598,7 +651,7 @@ export default function App() {
       }
       
       setTerminalLogs(prev => [...prev, 
-        `[${new Date().toLocaleTimeString()}] ORDER-OUT: ${amountNum} ${modalSelectedCoin.symbol} (${modalSelectedBank}) -> ${modalAddress.trim()} [PENDENTE]`
+        `[${new Date().toLocaleTimeString()}] TRANSFER-OUT (${sendMode.toUpperCase()}): ${amountNum} ${modalSelectedCoin.symbol} -> ${modalAddress.trim()} [PENDING]`
       ]);
     }, 1200);
   };
@@ -661,7 +714,7 @@ export default function App() {
       }
       
       setTerminalLogs(prev => [...prev, 
-        `[${new Date().toLocaleTimeString()}] SELL-ORDER: ${amountNum} ${modalSelectedCoin.symbol} -> ${modalAddress.trim()} [PENDENTE]`
+        `[${new Date().toLocaleTimeString()}] SELL-ORDER (${modalSelectedBank}): ${amountNum} ${modalSelectedCoin.symbol} -> ${modalAddress.trim()} [PENDING]`
       ]);
     }, 1200);
   };
@@ -790,15 +843,15 @@ export default function App() {
     const newLogs = [...terminalLogs, `kali@coldvault:~$ ${terminalInput}`];
 
     if (cmd === 'help') {
-      newLogs.push('COMANDOS DISPONÍVEIS:');
-      newLogs.push('  balance        - Exibe o saldo da carteira e moedas em custódia');
-      newLogs.push('  wmr            - Detalhes e cotação da moeda principal WMR Token');
-      newLogs.push('  banks          - Lista os bancos suportados para transferências');
-      newLogs.push('  coins          - Lista todas as 18 criptomoedas ativas');
-      newLogs.push('  connect        - Conecta ao Firebase');
-      newLogs.push('  disconnect     - Desconecta do Firebase (congela dados)');
-      newLogs.push('  clear          - Limpa o histórico do terminal');
-      newLogs.push('  audit          - Auditoria de integridade');
+      newLogs.push('AVAILABLE COMMANDS:');
+      newLogs.push('  balance        - Display wallet balance and assets in custody');
+      newLogs.push('  wmr            - Details and quote for primary asset WMR Token');
+      newLogs.push('  banks          - List supported settlement banking partners');
+      newLogs.push('  coins          - List all 18 active cryptocurrencies');
+      newLogs.push('  connect        - Connect to remote server');
+      newLogs.push('  disconnect     - Disconnect from remote server (freeze data)');
+      newLogs.push('  clear          - Clear terminal log output');
+      newLogs.push('  audit          - System integrity audit check');
     } else if (cmd === 'connect') {
       handleConnectFirebase();
       setTerminalInput('');
@@ -808,22 +861,22 @@ export default function App() {
       setTerminalInput('');
       return;
     } else if (cmd === 'balance') {
-      newLogs.push(isConnected ? `SALDO DISPONÍVEL FIAT: $${balanceFiat.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'SALDO FIAT: OCULTO (MODO OFFLINE)');
-      newLogs.push('PORTFÓLIO ATIVO:');
+      newLogs.push(isConnected ? `FIAT AVAILABLE BALANCE: $${balanceFiat.toLocaleString('en-US', {minimumFractionDigits: 2})}` : 'FIAT BALANCE: HIDDEN (OFFLINE MODE)');
+      newLogs.push('ACTIVE PORTFOLIO:');
       Object.entries(portfolio).forEach(([symbol, qty]) => {
         const coin = coins.find((c) => c.symbol === symbol);
         const qtyNum = typeof qty === 'number' ? qty : parseFloat(qty as any) || 0;
         const val = qtyNum * (coin ? coin.price : 0);
-        newLogs.push(`  • ${symbol}: ${qtyNum} ${isConnected ? `($${val.toLocaleString('pt-BR', {minimumFractionDigits: 2})})` : ''}`);
+        newLogs.push(`  • ${symbol}: ${qtyNum} ${isConnected ? `($${val.toLocaleString('en-US', {minimumFractionDigits: 2})})` : ''}`);
       });
     } else if (cmd === 'wmr') {
       const wmrCoin = coins.find(c => c.symbol === 'WMR');
-      newLogs.push(`[WMR TOKEN - MOEDA PRINCIPAL]`);
-      newLogs.push(`  Preço Atual: $${wmrCoin?.price.toLocaleString()}`);
-      newLogs.push(`  Variação 24h: +${wmrCoin?.variation}%`);
-      newLogs.push(`  Custódia na Carteira: ${portfolio['WMR'] || 0} WMR`);
+      newLogs.push(`[WMR TOKEN - PRIMARY ASSET]`);
+      newLogs.push(`  Current Price: $${wmrCoin?.price.toLocaleString()}`);
+      newLogs.push(`  24h Variation: +${wmrCoin?.variation}%`);
+      newLogs.push(`  Vault Custody: ${portfolio['WMR'] || 0} WMR`);
     } else if (cmd === 'banks') {
-      newLogs.push('BANCOS PARCEIROS REGISTRADOS:');
+      newLogs.push('REGISTERED SETTLEMENT BANK PARTNERS:');
       BANK_OPTIONS.forEach(b => newLogs.push(`  - ${b}`));
     } else if (cmd === 'coins') {
       coins.forEach((c) => {
@@ -834,11 +887,11 @@ export default function App() {
       setTerminalInput('');
       return;
     } else if (cmd === 'audit') {
-      newLogs.push('-> Hash de integridade WMR: INTEGRIDADE OK');
-      newLogs.push(`-> Estado Servidor: ${isConnected ? 'CONECTADO' : 'DESCONECTADO (OFFLINE)'}`);
-      newLogs.push('[✓] AUDITORIA CONCLUÍDA');
+      newLogs.push('-> WMR cryptographic integrity: VERIFIED');
+      newLogs.push(`-> Server state: ${isConnected ? 'CONNECTED' : 'DISCONNECTED (OFFLINE)'}`);
+      newLogs.push('[✓] AUDIT COMPLETED SUCCESSFULLY');
     } else {
-      newLogs.push(`Comando não reconhecido: "${cmd}". Digite "help" para ajuda.`);
+      newLogs.push(`Command not recognized: "${cmd}". Type "help" for a list of available commands.`);
     }
 
     setTerminalLogs(newLogs);
@@ -1166,6 +1219,20 @@ export default function App() {
                 title="Bloquear Carteira"
               >
                 <Lock className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={handleUpdateWalletVersion}
+                disabled={!updateAvailable}
+                className={`px-3 py-2 border rounded-lg text-xs font-mono font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  updateAvailable
+                    ? 'border-emerald-500 bg-emerald-950/60 text-emerald-300 hover:bg-emerald-900/80 shadow-[0_0_15px_rgba(16,185,129,0.4)] animate-pulse'
+                    : 'border-slate-800 text-slate-600 bg-slate-900/40 cursor-not-allowed opacity-50'
+                }`}
+                title={updateAvailable ? 'Atualizar Versão da Carteira (Ativado pelo Admin)' : 'Atualização de Versão Bloqueada pelo Admin'}
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${updateAvailable ? 'text-emerald-400' : 'text-slate-600'}`} />
+                <span className="hidden sm:inline">Atualizar Versão</span>
               </button>
             </div>
           </header>
@@ -1773,104 +1840,290 @@ export default function App() {
             {/* RECEIVE MODAL */}
             {activeModal === 'receive' && (
               <div className="space-y-4 text-center">
-                <div className="flex justify-center">
-                  {generateQRCodeSvg(`0xKALI_LOCAL_${modalSelectedCoin.symbol}_VAULT`)}
+                <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-xl space-y-2 text-left">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Endereço de Carga Local Vault</span>
+                    <span className="text-[9px] bg-cyan-950 text-cyan-300 border border-cyan-800/60 px-2 py-0.5 rounded font-mono font-bold">COLD STORAGE</span>
+                  </div>
+                  <div className="text-cyan-200 font-mono text-sm font-bold break-all bg-slate-950 p-2.5 rounded border border-slate-800 select-all">
+                    0xKALI_LOCAL_{modalSelectedCoin.symbol}_VAULT
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-mono">
+                    Utilize este endereço local de custódia para receber depósitos de {modalSelectedCoin.name} ({modalSelectedCoin.symbol}).
+                  </p>
                 </div>
 
-                <div className="p-3 bg-slate-900 border border-slate-800 rounded space-y-1">
-                  <span className="text-[10px] text-slate-500 uppercase font-bold">Endereço de Carga Local ({modalSelectedCoin.symbol})</span>
-                  <div className="text-cyan-300 font-bold break-all">0xKALI_LOCAL_{modalSelectedCoin.symbol}_VAULT</div>
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1 text-left">Selecione o Banco Origem:</label>
-                  <select
-                    value={modalSelectedBank}
-                    onChange={(e) => setModalSelectedBank(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded p-2 text-slate-200 outline-none"
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleCopyToClipboard(`0xKALI_LOCAL_${modalSelectedCoin.symbol}_VAULT`, 'Endereço Local')}
+                    className="w-full py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded uppercase tracking-wider font-mono cursor-pointer transition-all shadow-lg flex items-center justify-center gap-2"
                   >
-                    {BANK_OPTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </select>
+                    <Copy className="w-4 h-4" /> Copiar Endereço Local
+                  </button>
                 </div>
 
-                <button
-                  onClick={handleRequestReceiveFund}
-                  className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded uppercase tracking-wider cursor-pointer"
-                >
-                  Solicitar Depósito de Fundos
-                </button>
+                <div className="text-[10px] text-slate-500 font-mono pt-2 border-t border-slate-900 flex justify-between items-center">
+                  <span>REDE: KALI COLD LEDGER</span>
+                  <span>PROTOCOLO: SECP256K1</span>
+                </div>
               </div>
             )}
 
-            {/* SEND / SELL / BUY FORM */}
-            {(activeModal === 'send' || activeModal === 'sell' || activeModal === 'buy') && (
-              <form 
-                onSubmit={
-                  activeModal === 'send' ? handleConfirmSend :
-                  activeModal === 'sell' ? handleConfirmSell :
-                  handleConfirmBuy
-                } 
-                className="space-y-4"
-              >
+            {/* SEND MODAL */}
+            {activeModal === 'send' && (
+              <form onSubmit={handleConfirmSend} className="space-y-4">
                 <div>
-                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Selecione o Banco Parceiro:</label>
-                  <select
-                    value={modalSelectedBank}
-                    onChange={(e) => setModalSelectedBank(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-200 outline-none"
-                  >
-                    {BANK_OPTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
-                  </select>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-2">Tipo de Envio:</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSendMode('crypto');
+                        setModalAddress('');
+                      }}
+                      className={`p-2.5 rounded font-mono text-xs font-bold border transition-all cursor-pointer text-center ${
+                        sendMode === 'crypto' 
+                          ? 'bg-purple-950/80 border-purple-500 text-purple-300 shadow-md' 
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      Outra Carteira Crypto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSendMode('bank');
+                        setModalAddress(`0xKALI_LOCAL_${modalSelectedCoin.symbol}_VAULT`);
+                      }}
+                      className={`p-2.5 rounded font-mono text-xs font-bold border transition-all cursor-pointer text-center ${
+                        sendMode === 'bank' 
+                          ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300 shadow-md' 
+                          : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      Transferência Bancária ($)
+                    </button>
+                  </div>
                 </div>
 
+                {sendMode === 'bank' && (
+                  <div>
+                    <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Selecione a Corretagem:</label>
+                    <select
+                      value={sendBrokerage}
+                      onChange={(e) => setSendBrokerage(e.target.value as any)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-mono text-xs"
+                    >
+                      {BROKERAGE_OPTIONS_SEND.map((b) => (
+                        <option key={b.id} value={b.id}>
+                          {b.name} ({b.deadline} • {b.fee})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 <div>
-                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Quantidade ({modalSelectedCoin.symbol}):</label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-slate-400 text-[10px] uppercase font-bold">Quantidade ({modalSelectedCoin.symbol}):</label>
+                    <span className="text-[10px] text-slate-500 font-mono">Disponível: {portfolio[modalSelectedCoin.symbol] || 0} {modalSelectedCoin.symbol}</span>
+                  </div>
                   <input
                     type="number"
                     step="0.0001"
                     value={modalAmount}
                     onChange={(e) => setModalAmount(e.target.value)}
                     placeholder="0.00"
-                    className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-bold"
+                    className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-bold font-mono"
                     required
                   />
                   {modalAmount && (
-                    <p className="text-[10px] text-cyan-400 mt-1">
-                      Equivalente em Fiat: ${(parseFloat(modalAmount || '0') * modalSelectedCoin.price).toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                    <p className="text-[10px] text-cyan-400 mt-1 font-mono">
+                      Equivalente em Fiat: ${(parseFloat(modalAmount || '0') * modalSelectedCoin.price).toLocaleString('en-US', {minimumFractionDigits: 2})}
                     </p>
                   )}
                 </div>
 
-                {(activeModal === 'send' || activeModal === 'sell') && (
-                  <div>
-                    <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">
-                      Destino:
-                    </label>
-                    <input
-                      type="text"
-                      value={modalAddress}
-                      onChange={(e) => setModalAddress(e.target.value)}
-                      placeholder=""
-                      className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded p-2.5 text-slate-100 font-mono text-xs outline-none"
-                      required
-                    />
-                  </div>
-                )}
+                <div>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">
+                    {sendMode === 'crypto' ? 'Destino (Chave PIX Aleatória Obrigatoria):' : 'Destino (Conta / Endereço Local):'}
+                  </label>
+                  <input
+                    type="text"
+                    value={modalAddress}
+                    onChange={(e) => setModalAddress(e.target.value)}
+                    placeholder={sendMode === 'crypto' ? 'Ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c' : 'Endereço ou Conta bancária de destino'}
+                    className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded p-2.5 text-slate-100 font-mono text-xs outline-none"
+                    required
+                  />
+                </div>
 
                 <div className="pt-2 flex gap-2">
                   <button
                     type="button"
                     onClick={() => setActiveModal(null)}
-                    className="w-1/2 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded cursor-pointer"
+                    className="w-1/2 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded cursor-pointer font-mono font-bold"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
                     disabled={isProcessingTx}
-                    className="w-1/2 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded cursor-pointer shadow-lg"
+                    className="w-1/2 py-2.5 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded cursor-pointer shadow-lg font-mono"
                   >
-                    {isProcessingTx ? 'Processando...' : 'Confirmar'}
+                    {isProcessingTx ? 'Processando...' : 'Confirmar Envio'}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* SELL MODAL */}
+            {activeModal === 'sell' && (
+              <form onSubmit={handleConfirmSell} className="space-y-4">
+                {coins.filter(c => (portfolio[c.symbol] || 0) > 0).length === 0 ? (
+                  <div className="p-4 bg-rose-950/40 border border-rose-800/60 rounded-lg text-center space-y-3 font-mono">
+                    <p className="text-rose-300 font-bold text-xs">Nenhuma criptomoeda com saldo disponível para venda na carteira.</p>
+                    <button
+                      type="button"
+                      onClick={() => setActiveModal(null)}
+                      className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 text-xs rounded font-bold cursor-pointer"
+                    >
+                      Fechar
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Selecione a Criptomoeda com Saldo:</label>
+                      <select
+                        value={modalSelectedCoin.symbol}
+                        onChange={(e) => {
+                          const coin = coins.find(c => c.symbol === e.target.value);
+                          if (coin) setModalSelectedCoin(coin);
+                        }}
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-mono text-xs font-bold"
+                      >
+                        {coins.filter(c => (portfolio[c.symbol] || 0) > 0).map((c) => (
+                          <option key={c.symbol} value={c.symbol}>
+                            {c.name} ({c.symbol}) - Saldo: {portfolio[c.symbol]}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Selecione a Corretagem:</label>
+                      <select
+                        value={modalSelectedBank}
+                        onChange={(e) => setModalSelectedBank(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-mono text-xs"
+                      >
+                        {SELL_BROKERAGES.map((b) => <option key={b} value={b}>{b}</option>)}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between items-center mb-1">
+                        <label className="block text-slate-400 text-[10px] uppercase font-bold">Quantidade a Vender ({modalSelectedCoin.symbol}):</label>
+                        <span className="text-[10px] text-slate-500 font-mono">Max: {portfolio[modalSelectedCoin.symbol] || 0}</span>
+                      </div>
+                      <input
+                        type="number"
+                        step="0.0001"
+                        value={modalAmount}
+                        onChange={(e) => setModalAmount(e.target.value)}
+                        placeholder="0.00"
+                        className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-bold font-mono"
+                        required
+                      />
+                      {modalAmount && (
+                        <p className="text-[10px] text-emerald-400 mt-1 font-mono">
+                          Valor Estimado: ${(parseFloat(modalAmount || '0') * modalSelectedCoin.price).toLocaleString('en-US', {minimumFractionDigits: 2})}
+                        </p>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">
+                        Destino para Recebimento:
+                      </label>
+                      <input
+                        type="text"
+                        value={modalAddress}
+                        onChange={(e) => setModalAddress(e.target.value)}
+                        placeholder="Endereço de destino ou Chave PIX"
+                        className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded p-2.5 text-slate-100 font-mono text-xs outline-none"
+                        required
+                      />
+                    </div>
+
+                    <div className="pt-2 flex gap-2 font-mono">
+                      <button
+                        type="button"
+                        onClick={() => setActiveModal(null)}
+                        className="w-1/2 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded cursor-pointer font-bold"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={isProcessingTx}
+                        className="w-1/2 py-2.5 bg-rose-600 hover:bg-rose-500 text-slate-950 font-bold rounded cursor-pointer shadow-lg"
+                      >
+                        {isProcessingTx ? 'Processando...' : 'Confirmar Venda'}
+                      </button>
+                    </div>
+                  </>
+                )}
+              </form>
+            )}
+
+            {/* BUY MODAL */}
+            {activeModal === 'buy' && (
+              <form onSubmit={handleConfirmBuy} className="space-y-4">
+                <div>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Selecione o Banco Parceiro:</label>
+                  <select
+                    value={modalSelectedBank}
+                    onChange={(e) => setModalSelectedBank(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-mono text-xs"
+                  >
+                    {BANK_OPTIONS.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">Quantidade a Comprar ({modalSelectedCoin.symbol}):</label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    value={modalAmount}
+                    onChange={(e) => setModalAmount(e.target.value)}
+                    placeholder="0.00"
+                    className="w-full bg-slate-900 border border-slate-800 rounded p-2.5 text-slate-100 outline-none font-bold font-mono"
+                    required
+                  />
+                  {modalAmount && (
+                    <p className="text-[10px] text-cyan-400 mt-1 font-mono">
+                      Custo Estimado: ${(parseFloat(modalAmount || '0') * modalSelectedCoin.price).toLocaleString('en-US', {minimumFractionDigits: 2})}
+                    </p>
+                  )}
+                </div>
+
+                <div className="pt-2 flex gap-2 font-mono">
+                  <button
+                    type="button"
+                    onClick={() => setActiveModal(null)}
+                    className="w-1/2 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-400 rounded cursor-pointer font-bold"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isProcessingTx}
+                    className="w-1/2 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded cursor-pointer shadow-lg"
+                  >
+                    {isProcessingTx ? 'Processando...' : 'Confirmar Compra'}
                   </button>
                 </div>
               </form>
