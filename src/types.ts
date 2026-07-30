@@ -15,6 +15,12 @@ export interface Coin {
   maxUpPercent?: number;
   maxDownPercent?: number;
   trend?: 'alta' | 'baixa' | 'neutro' | 'aleatorio';
+  // Admin & Public API Integration metadata
+  category?: string;
+  status?: 'active' | 'inactive';
+  displayOrder?: number;
+  iconUrl?: string;
+  isManuallyEdited?: boolean;
 }
 
 export interface Transaction {

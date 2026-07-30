@@ -20,6 +20,8 @@ import { calculateCoinOscillation } from './lib/market';
 import { isValidRandomPixKey, generateSamplePixKey } from './lib/validators';
 import { AdminPanel } from './components/AdminPanel';
 
+export const LOCAL_VAULT_ADDRESS = '0xKALI_LOCAL_COLD_VAULT_f4b7a77ff';
+
 export const BANK_OPTIONS = [
   'Itaú Unibanco',
   'Banco Bradesco',
@@ -571,12 +573,37 @@ export default function App() {
     setSendBrokerage('standard');
     setModalAmount('');
     if (type === 'receive') {
-      setModalAddress(`0xKALI_LOCAL_${(coinSymbol || 'WMR')}_VAULT`);
+      setModalAddress(LOCAL_VAULT_ADDRESS);
+    } else if (type === 'send') {
+      setModalAddress(LOCAL_VAULT_ADDRESS);
     } else {
       setModalAddress('');
     }
     setTxSuccessInfo(null);
     setActiveModal(type);
+  };
+
+  // Delete all transactions handler
+  const handleClearAllTransactions = () => {
+    if (window.confirm('Tem certeza de que deseja EXCLUIR TODO o histórico de transações?')) {
+      setTransactions([]);
+      storage.saveTransactions([]);
+      playBeep('click');
+      addToast('Histórico de transações zerado com sucesso!', 'success');
+      setTerminalLogs(prev => [
+        ...prev,
+        `[${new Date().toLocaleTimeString()}] [TRANSACTION LOG] Cleared all transactions from local vault history.`
+      ]);
+    }
+  };
+
+  // Delete single transaction handler
+  const handleDeleteSingleTransaction = (txId: string) => {
+    const updated = transactions.filter(t => t.id !== txId);
+    setTransactions(updated);
+    storage.saveTransactions(updated);
+    playBeep('click');
+    addToast(`Transação ${txId} excluída do histórico!`, 'info');
   };
 
   // Run sending transaction
@@ -603,14 +630,6 @@ export default function App() {
       return;
     }
 
-    if (sendMode === 'crypto') {
-      if (!isValidRandomPixKey(modalAddress.trim())) {
-        playBeep('error');
-        addToast('Endereço de destino inválido! Formato obrigatório: Chave PIX Aleatória (ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c)', 'error');
-        return;
-      }
-    }
-
     setIsProcessingTx(true);
     playBeep('click');
 
@@ -618,7 +637,7 @@ export default function App() {
       const generatedHash = Array.from({length: 64}, () => Math.floor(Math.random()*16).toString(16)).join('');
       const fiatEq = amountNum * modalSelectedCoin.price;
 
-      let bankInfo = 'Carteira Cripto Externa';
+      let bankInfo = 'Carteira Cripto Externa / Vault';
       if (sendMode === 'bank') {
         const brok = BROKERAGE_OPTIONS_SEND.find(b => b.id === sendBrokerage) || BROKERAGE_OPTIONS_SEND[0];
         bankInfo = `${brok.name} (${brok.deadline} - ${brok.fee})`;
@@ -640,6 +659,7 @@ export default function App() {
       const newTxList = [newTx, ...transactions];
 
       setTransactions(newTxList);
+      storage.saveTransactions(newTxList);
       setIsProcessingTx(false);
       setActiveModal(null);
       setTxSuccessInfo(newTx);
@@ -1368,9 +1388,9 @@ export default function App() {
                       <span>ECDSA_SHA256</span>
                     </div>
                     <div className="flex justify-between items-center gap-2">
-                      <code className="text-xs font-mono text-cyan-300 break-all select-all">0xKALI_LOCAL_COLD_VAULT_f4b7a77ff</code>
+                      <code className="text-xs font-mono text-cyan-300 break-all select-all">{LOCAL_VAULT_ADDRESS}</code>
                       <button 
-                        onClick={() => handleCopyToClipboard('0xKALI_LOCAL_COLD_VAULT_f4b7a77ff', 'Endereço')}
+                        onClick={() => handleCopyToClipboard(LOCAL_VAULT_ADDRESS, 'Endereço')}
                         className="p-1 hover:bg-slate-800 text-slate-400 hover:text-cyan-400 rounded transition-colors cursor-pointer"
                       >
                         <Copy className="w-3.5 h-3.5" />
@@ -1525,31 +1545,45 @@ export default function App() {
                       <h3 className="text-xs font-mono font-black text-slate-200 uppercase tracking-widest">Histórico de Transações e Bancos</h3>
                     </div>
                     
-                    {/* Filter tabs */}
-                    <div className="flex flex-wrap gap-1.5 font-mono text-[9px] font-bold">
-                      {(['TODAS', 'ENVIADO', 'RECEBIDO', 'COMPRA', 'VENDA'] as const).map((filter) => (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Clear All History Button */}
+                      {transactions.length > 0 && (
                         <button
-                          key={filter}
-                          onClick={() => {
-                            setTxHistoryFilter(filter);
-                            playBeep('click');
-                          }}
-                          className={`px-2 py-1 rounded border transition-colors cursor-pointer uppercase ${
-                            txHistoryFilter === filter 
-                              ? 'bg-cyan-950/30 text-cyan-300 border-cyan-500/40' 
-                              : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200'
-                          }`}
+                          onClick={handleClearAllTransactions}
+                          className="px-2.5 py-1 bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-700/60 rounded font-mono text-[9px] font-bold uppercase transition-all flex items-center gap-1 cursor-pointer"
+                          title="Excluir TODO o Histórico de Transações"
                         >
-                          {filter}
+                          <Trash2 className="w-3 h-3 text-red-400" />
+                          <span>Zerar Histórico</span>
                         </button>
-                      ))}
+                      )}
+
+                      {/* Filter tabs */}
+                      <div className="flex flex-wrap gap-1 font-mono text-[9px] font-bold">
+                        {(['TODAS', 'ENVIADO', 'RECEBIDO', 'COMPRA', 'VENDA'] as const).map((filter) => (
+                          <button
+                            key={filter}
+                            onClick={() => {
+                              setTxHistoryFilter(filter);
+                              playBeep('click');
+                            }}
+                            className={`px-2 py-1 rounded border transition-colors cursor-pointer uppercase ${
+                              txHistoryFilter === filter 
+                                ? 'bg-cyan-950/30 text-cyan-300 border-cyan-500/40' 
+                                : 'bg-slate-900/60 text-slate-400 border-slate-800 hover:text-slate-200'
+                            }`}
+                          >
+                            {filter}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
                   <div className="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-1">
                     {filteredTransactions.length === 0 ? (
                       <div className="text-center py-8 text-slate-500 font-mono text-xs">
-                        Nenhuma transação registrada nesta categoria.
+                        Nenhuma transação registrada nesta categoria. Histórico limpo.
                       </div>
                     ) : (
                       filteredTransactions.map((tx) => (
@@ -1578,13 +1612,24 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="text-right flex sm:flex-col justify-between sm:justify-center items-center sm:items-end gap-2 sm:gap-0 border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-900">
-                            <span className="text-xs font-bold font-mono text-slate-100">
-                              {isConnected ? `$${tx.fiatValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'Fiat Oculto'}
-                            </span>
-                            <span className="text-[9px] bg-slate-950/60 border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider mt-0.5 uppercase">
-                              {tx.status}
-                            </span>
+                          <div className="flex items-center gap-3 justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-slate-900">
+                            <div className="text-right">
+                              <span className="text-xs font-bold font-mono text-slate-100 block">
+                                {isConnected ? `$${tx.fiatValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}` : 'Fiat Oculto'}
+                              </span>
+                              <span className="text-[9px] bg-slate-950/60 border border-emerald-500/30 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold tracking-wider mt-0.5 uppercase inline-block">
+                                {tx.status}
+                              </span>
+                            </div>
+
+                            {/* Delete single transaction button */}
+                            <button
+                              onClick={() => handleDeleteSingleTransaction(tx.id)}
+                              className="p-1.5 hover:bg-red-950/80 text-slate-500 hover:text-red-400 rounded border border-transparent hover:border-red-800/60 transition-all cursor-pointer"
+                              title="Excluir esta transação individual"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
                       ))
@@ -1845,20 +1890,20 @@ export default function App() {
                     <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-wider">Endereço de Carga Local Vault</span>
                     <span className="text-[9px] bg-cyan-950 text-cyan-300 border border-cyan-800/60 px-2 py-0.5 rounded font-mono font-bold">COLD STORAGE</span>
                   </div>
-                  <div className="text-cyan-200 font-mono text-sm font-bold break-all bg-slate-950 p-2.5 rounded border border-slate-800 select-all">
-                    0xKALI_LOCAL_{modalSelectedCoin.symbol}_VAULT
+                  <div className="text-cyan-200 font-mono text-xs sm:text-sm font-bold break-all bg-slate-950 p-2.5 rounded border border-slate-800 select-all">
+                    {LOCAL_VAULT_ADDRESS}
                   </div>
                   <p className="text-[10px] text-slate-400 font-mono">
-                    Utilize este endereço local de custódia para receber depósitos de {modalSelectedCoin.name} ({modalSelectedCoin.symbol}).
+                    Utilize este endereço local padrão de custódia para receber depósitos de {modalSelectedCoin.name} ({modalSelectedCoin.symbol}).
                   </p>
                 </div>
 
                 <div className="flex gap-2">
                   <button
-                    onClick={() => handleCopyToClipboard(`0xKALI_LOCAL_${modalSelectedCoin.symbol}_VAULT`, 'Endereço Local')}
+                    onClick={() => handleCopyToClipboard(LOCAL_VAULT_ADDRESS, 'Endereço Local Vault')}
                     className="w-full py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded uppercase tracking-wider font-mono cursor-pointer transition-all shadow-lg flex items-center justify-center gap-2"
                   >
-                    <Copy className="w-4 h-4" /> Copiar Endereço Local
+                    <Copy className="w-4 h-4" /> Copiar Endereço Local Vault
                   </button>
                 </div>
 
@@ -1873,13 +1918,13 @@ export default function App() {
             {activeModal === 'send' && (
               <form onSubmit={handleConfirmSend} className="space-y-4">
                 <div>
-                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-2">Tipo de Envio:</label>
+                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-2">Opção de Envio:</label>
                   <div className="grid grid-cols-2 gap-2">
                     <button
                       type="button"
                       onClick={() => {
                         setSendMode('crypto');
-                        setModalAddress('');
+                        setModalAddress(LOCAL_VAULT_ADDRESS);
                       }}
                       className={`p-2.5 rounded font-mono text-xs font-bold border transition-all cursor-pointer text-center ${
                         sendMode === 'crypto' 
@@ -1893,7 +1938,7 @@ export default function App() {
                       type="button"
                       onClick={() => {
                         setSendMode('bank');
-                        setModalAddress(`0xKALI_LOCAL_${modalSelectedCoin.symbol}_VAULT`);
+                        setModalAddress('');
                       }}
                       className={`p-2.5 rounded font-mono text-xs font-bold border transition-all cursor-pointer text-center ${
                         sendMode === 'bank' 
@@ -1945,14 +1990,25 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 text-[10px] uppercase font-bold mb-1">
-                    {sendMode === 'crypto' ? 'Destino (Chave PIX Aleatória Obrigatoria):' : 'Destino (Conta / Endereço Local):'}
-                  </label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-slate-400 text-[10px] uppercase font-bold">
+                      {sendMode === 'crypto' ? 'Endereço da Carteira Cripto / Vault de Destino:' : 'Destino Bancário (Chave PIX ou Conta):'}
+                    </label>
+                    {sendMode === 'crypto' && (
+                      <button
+                        type="button"
+                        onClick={() => setModalAddress(LOCAL_VAULT_ADDRESS)}
+                        className="text-[9px] text-cyan-400 hover:underline font-mono"
+                      >
+                        Usar Vault Local
+                      </button>
+                    )}
+                  </div>
                   <input
                     type="text"
                     value={modalAddress}
                     onChange={(e) => setModalAddress(e.target.value)}
-                    placeholder={sendMode === 'crypto' ? 'Ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c' : 'Endereço ou Conta bancária de destino'}
+                    placeholder={sendMode === 'crypto' ? `Ex: ${LOCAL_VAULT_ADDRESS}` : 'Ex: 8f3b2a1c-4d5e-6f7a-8b9c-0d1e2f3a4b5c ou Dados Bancários'}
                     className="w-full bg-slate-900 border border-slate-800 focus:border-cyan-400 rounded p-2.5 text-slate-100 font-mono text-xs outline-none"
                     required
                   />

@@ -3,7 +3,8 @@ import {
   ShieldCheck, Database, Key, Coins, Sliders, Activity, RefreshCw, 
   Plus, Edit, Trash2, Check, AlertCircle, TrendingUp, TrendingDown, Clock, 
   Users, ArrowLeft, Save, Server, Shield, CheckCircle2, Lock, XCircle,
-  ArrowUpRight, ArrowDownLeft, ShoppingCart, Banknote, Search, Filter, MessageSquare, Wallet
+  ArrowUpRight, ArrowDownLeft, ShoppingCart, Banknote, Search, Filter, MessageSquare, Wallet,
+  Globe, Download, RotateCcw, UploadCloud, Layers, Eye, EyeOff, Sparkles, FileCheck, CheckCircle
 } from 'lucide-react';
 import { Coin, OperationPasswords, MarketSettings, SyncLog, AdminDashboardStats, Transaction } from '../types';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
@@ -46,6 +47,21 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
     firestoreStatus: 'CONECTADO'
   });
 
+  // Public API Import & Draft Review States
+  const [draftCoins, setDraftCoins] = useState<Coin[]>([]);
+  const [lastApiFetchedList, setLastApiFetchedList] = useState<Coin[] | null>(null);
+  const [lastApiImportTime, setLastApiImportTime] = useState<string | null>(null);
+  const [isImportingApi, setIsImportingApi] = useState<boolean>(false);
+  const [apiImportSuccess, setApiImportSuccess] = useState<string | null>(null);
+  const [apiImportError, setApiImportError] = useState<string | null>(null);
+  const [showImportStrategyModal, setShowImportStrategyModal] = useState<boolean>(false);
+  const [pendingApiFetchedCoins, setPendingApiFetchedCoins] = useState<Coin[] | null>(null);
+
+  // Coin Search & Filtering
+  const [coinSearchQuery, setCoinSearchQuery] = useState<string>('');
+  const [coinCategoryFilter, setCoinCategoryFilter] = useState<string>('TODAS');
+  const [coinStatusFilter, setCoinStatusFilter] = useState<'ALL' | 'active' | 'inactive'>('ALL');
+
   // Transaction tab filter & search
   const [txTabFilter, setTxTabFilter] = useState<'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'>('ALL');
   const [txSearchQuery, setTxSearchQuery] = useState<string>('');
@@ -63,7 +79,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
     marketCap: 1000000,
     volume: 50000,
     iconName: 'Cpu',
-    color: '#00f0ff'
+    color: '#00f0ff',
+    category: 'Geral',
+    status: 'active' as 'active' | 'inactive',
+    displayOrder: 1,
+    iconUrl: ''
   });
 
   useEffect(() => {
@@ -131,15 +151,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
       // 3. Coins
       try {
         const coinsSnap = await fetchWithTimeout(getDoc(doc(db, 'system_data/coins')));
+        let loadedCoins: Coin[] = [];
         if (coinsSnap.exists() && Array.isArray(coinsSnap.data()?.list) && coinsSnap.data()?.list.length > 0) {
-          setCoins(coinsSnap.data()?.list);
+          loadedCoins = coinsSnap.data()?.list;
           connected = true;
         } else {
-          setCoins(storage.loadCoins([]));
+          loadedCoins = storage.loadCoins([]);
         }
+        setCoins(loadedCoins);
+        setDraftCoins(loadedCoins);
       } catch (e) {
         console.warn('Coins fetch fallback:', e);
-        setCoins(storage.loadCoins([]));
+        const loadedCoins = storage.loadCoins([]);
+        setCoins(loadedCoins);
+        setDraftCoins(loadedCoins);
       }
 
       // 4. Transactions
@@ -365,7 +390,210 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
     }
   };
 
-  // --- COIN MANAGEMENT ---
+  // --- PUBLIC API INTEGRATION & COIN MANAGEMENT ---
+  const fetchCoinsFromPublicApi = async () => {
+    setIsImportingApi(true);
+    setApiImportError(null);
+    setApiImportSuccess(null);
+
+    try {
+      let fetchedCoins: Coin[] = [];
+
+      // Primary Attempt: CoinGecko Free Markets API
+      try {
+        const response = await fetch(
+          'https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=50&page=1&sparkline=false',
+          { headers: { 'Accept': 'application/json' } }
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          if (Array.isArray(data) && data.length > 0) {
+            fetchedCoins = data.map((item: any, index: number) => {
+              const symbol = (item.symbol || '').toUpperCase();
+              return {
+                id: item.id || symbol.toLowerCase(),
+                name: item.name || symbol,
+                symbol: symbol,
+                price: Number(item.current_price) || 0,
+                variation: Number(item.price_change_percentage_24h) || 0,
+                marketCap: Number(item.market_cap) || 0,
+                volume: Number(item.total_volume) || 0,
+                history: [
+                  Number(item.current_price) * 0.95 || 10,
+                  Number(item.current_price) * 0.98 || 10,
+                  Number(item.current_price) || 10
+                ],
+                iconName: symbol === 'BTC' ? 'Coins' : symbol === 'ETH' ? 'Activity' : 'Cpu',
+                color: item.color || (symbol === 'BTC' ? '#f7931a' : symbol === 'ETH' ? '#627eea' : '#00f0ff'),
+                category: symbol === 'BTC' || symbol === 'ETH' || symbol === 'SOL' ? 'Layer 1' : 'DeFi',
+                status: 'active' as const,
+                displayOrder: index + 1,
+                iconUrl: item.image || '',
+                isManuallyEdited: false
+              };
+            });
+          }
+        }
+      } catch (cgErr) {
+        console.warn('CoinGecko fetch failed, falling back to CoinCap:', cgErr);
+      }
+
+      // Fallback Attempt: CoinCap Free API
+      if (fetchedCoins.length === 0) {
+        const ccRes = await fetch('https://api.coincap.io/v2/assets?limit=50');
+        if (ccRes.ok) {
+          const ccData = await ccRes.json();
+          if (ccData && Array.isArray(ccData.data)) {
+            fetchedCoins = ccData.data.map((item: any, index: number) => {
+              const symbol = (item.symbol || '').toUpperCase();
+              const price = parseFloat(item.priceUsd) || 0;
+              return {
+                id: item.id || symbol.toLowerCase(),
+                name: item.name || symbol,
+                symbol: symbol,
+                price: price,
+                variation: parseFloat(item.changePercent24Hr) || 0,
+                marketCap: parseFloat(item.marketCapUsd) || 0,
+                volume: parseFloat(item.volumeUsd24Hr) || 0,
+                history: [price * 0.95, price * 0.98, price],
+                iconName: 'Cpu',
+                color: symbol === 'BTC' ? '#f7931a' : symbol === 'ETH' ? '#627eea' : '#00f0ff',
+                category: 'Geral',
+                status: 'active' as const,
+                displayOrder: index + 1,
+                iconUrl: `https://assets.coincap.io/assets/icons/${symbol.toLowerCase()}@2x.png`,
+                isManuallyEdited: false
+              };
+            });
+          }
+        }
+      }
+
+      if (fetchedCoins.length === 0) {
+        throw new Error('Não foi possível obter dados das APIs públicas gratuitas de criptomoedas.');
+      }
+
+      const importTimestamp = new Date().toLocaleString('pt-BR');
+      setLastApiFetchedList(fetchedCoins);
+      setLastApiImportTime(importTimestamp);
+
+      // Check if user already has draft coins with manual edits
+      const hasEdits = draftCoins.some(c => c.isManuallyEdited);
+      if (draftCoins.length > 0 && hasEdits) {
+        setPendingApiFetchedCoins(fetchedCoins);
+        setShowImportStrategyModal(true);
+      } else {
+        // Direct replacement if no manual edits exist
+        setDraftCoins(fetchedCoins);
+        setApiImportSuccess(`Importação realizada com sucesso! ${fetchedCoins.length} moedas carregadas no rascunho.`);
+        showStatus(`${fetchedCoins.length} criptomoedas importadas no rascunho para revisão.`, 'success');
+      }
+
+      storage.addSyncLog('ADMIN_EDIT', `Consulta realizada na API Pública: ${fetchedCoins.length} moedas obtidas.`);
+    } catch (err: any) {
+      console.error('Erro ao consultar API pública:', err);
+      setApiImportError(err.message || 'Erro de conexão com a API pública.');
+      showStatus('Falha ao importar da API pública.', 'error');
+    } finally {
+      setIsImportingApi(false);
+    }
+  };
+
+  // Strategy modal resolver (Replace, Preserve Edits, Merge)
+  const handleApplyApiImportStrategy = (strategy: 'replace' | 'preserve_edits' | 'merge') => {
+    if (!pendingApiFetchedCoins) return;
+
+    let finalCoins: Coin[] = [];
+
+    if (strategy === 'replace') {
+      finalCoins = pendingApiFetchedCoins;
+    } else if (strategy === 'preserve_edits') {
+      // Keep any manually edited coins, replace/add others from API
+      const editedMap = new Map(draftCoins.filter(c => c.isManuallyEdited).map(c => [c.symbol, c]));
+      finalCoins = pendingApiFetchedCoins.map(apiCoin => {
+        if (editedMap.has(apiCoin.symbol)) {
+          return editedMap.get(apiCoin.symbol)!;
+        }
+        return apiCoin;
+      });
+      // Append any manual coins that were custom created and not in API
+      draftCoins.filter(c => c.isManuallyEdited && !pendingApiFetchedCoins.some(a => a.symbol === c.symbol)).forEach(c => {
+        finalCoins.push(c);
+      });
+    } else if (strategy === 'merge') {
+      // Update Price & Variation from API, keep user custom attributes
+      const existingMap = new Map<string, Coin>(draftCoins.map(c => [c.symbol, c]));
+      finalCoins = pendingApiFetchedCoins.map(apiCoin => {
+        const existing = existingMap.get(apiCoin.symbol);
+        if (existing) {
+          return {
+            ...existing,
+            price: apiCoin.price,
+            variation: apiCoin.variation,
+            marketCap: apiCoin.marketCap,
+            volume: apiCoin.volume,
+            history: apiCoin.history,
+            iconUrl: apiCoin.iconUrl || existing.iconUrl
+          };
+        }
+        return apiCoin;
+      });
+    }
+
+    setDraftCoins(finalCoins);
+    setShowImportStrategyModal(false);
+    setPendingApiFetchedCoins(null);
+    setApiImportSuccess(`Importação aplicada com o modo [${strategy.toUpperCase()}]! ${finalCoins.length} moedas no rascunho.`);
+    showStatus(`Dados da API aplicados no rascunho com sucesso!`, 'success');
+  };
+
+  // Restore API data (discard manual edits)
+  const handleRestoreApiData = () => {
+    if (lastApiFetchedList && lastApiFetchedList.length > 0) {
+      if (window.confirm('Deseja descartar as alterações manuais e restaurar os dados originais da API?')) {
+        setDraftCoins(lastApiFetchedList);
+        showStatus('Rascunho restaurado para a versão original da API!', 'info');
+      }
+    } else {
+      showStatus('Nenhum histórico recente da API encontrado. Clique em "Importar da API".', 'info');
+    }
+  };
+
+  // Cancel draft changes (reload from Firebase / stored coins)
+  const handleCancelDraftChanges = () => {
+    if (window.confirm('Deseja descartar todas as alterações não publicadas e voltar às moedas ativas?')) {
+      setDraftCoins(coins);
+      setIsEditingCoin(false);
+      showStatus('Alterações descartadas. Dados restaurados do banco.', 'info');
+    }
+  };
+
+  // Publish draft coins to Firebase & Local Storage
+  const handlePublishToFirebase = async () => {
+    if (draftCoins.length === 0) {
+      showStatus('Nenhuma moeda disponível para publicação.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await setDoc(doc(db, 'system_data/coins'), { list: draftCoins });
+      setCoins(draftCoins);
+      storage.saveCoins(draftCoins);
+      storage.addSyncLog('ADMIN_EDIT', `Publicado no Firebase: ${draftCoins.length} criptomoedas atualizadas.`);
+      setApiImportSuccess(`Publicado com sucesso no Firebase! ${draftCoins.length} moedas ativas na carteira.`);
+      showStatus(`${draftCoins.length} criptomoedas PUBLICADAS com sucesso no Firebase!`, 'success');
+    } catch (err: any) {
+      console.error(err);
+      storage.saveCoins(draftCoins);
+      setCoins(draftCoins);
+      showStatus('Salvo localmente (erro ao conectar com servidor Firebase)', 'info');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleOpenAddCoin = () => {
     setEditingCoinId(null);
     setCoinForm({
@@ -376,7 +604,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
       marketCap: 1000000,
       volume: 50000,
       iconName: 'Cpu',
-      color: '#00f0ff'
+      color: '#00f0ff',
+      category: 'Geral',
+      status: 'active',
+      displayOrder: draftCoins.length + 1,
+      iconUrl: ''
     });
     setIsEditingCoin(true);
   };
@@ -391,12 +623,16 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
       marketCap: c.marketCap,
       volume: c.volume,
       iconName: c.iconName,
-      color: c.color
+      color: c.color,
+      category: c.category || 'Geral',
+      status: c.status || 'active',
+      displayOrder: c.displayOrder || 1,
+      iconUrl: c.iconUrl || ''
     });
     setIsEditingCoin(true);
   };
 
-  const handleSaveCoin = async (e: React.FormEvent) => {
+  const handleSaveCoin = (e: React.FormEvent) => {
     e.preventDefault();
     if (!coinForm.name || !coinForm.symbol) {
       showStatus('Nome e Sigla são obrigatórios', 'error');
@@ -405,7 +641,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
 
     let updatedList: Coin[];
     if (editingCoinId) {
-      updatedList = coins.map(c => c.id === editingCoinId ? {
+      updatedList = draftCoins.map(c => c.id === editingCoinId ? {
         ...c,
         name: coinForm.name,
         symbol: coinForm.symbol.toUpperCase(),
@@ -414,7 +650,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
         marketCap: Number(coinForm.marketCap),
         volume: Number(coinForm.volume),
         iconName: coinForm.iconName,
-        color: coinForm.color
+        color: coinForm.color,
+        category: coinForm.category,
+        status: coinForm.status,
+        displayOrder: Number(coinForm.displayOrder),
+        iconUrl: coinForm.iconUrl,
+        isManuallyEdited: true
       } : c);
     } else {
       const newCoin: Coin = {
@@ -427,45 +668,26 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
         volume: Number(coinForm.volume),
         history: [coinForm.price * 0.95, coinForm.price * 0.98, coinForm.price],
         iconName: coinForm.iconName,
-        color: coinForm.color
+        color: coinForm.color,
+        category: coinForm.category,
+        status: coinForm.status,
+        displayOrder: Number(coinForm.displayOrder),
+        iconUrl: coinForm.iconUrl,
+        isManuallyEdited: true
       };
-      updatedList = [...coins, newCoin];
+      updatedList = [...draftCoins, newCoin];
     }
 
-    setCoins(updatedList);
+    setDraftCoins(updatedList);
     setIsEditingCoin(false);
-
-    setLoading(true);
-    try {
-      await setDoc(doc(db, 'system_data/coins'), { list: updatedList });
-      storage.saveCoins(updatedList);
-      storage.addSyncLog('ADMIN_EDIT', `Moeda ${coinForm.symbol.toUpperCase()} atualizada/cadastrada.`);
-      showStatus('Moedas sincronizadas no servidor com sucesso!', 'success');
-    } catch (err) {
-      console.error(err);
-      storage.saveCoins(updatedList);
-      showStatus('Salvo localmente (erro de conexão com servidor)', 'error');
-    } finally {
-      setLoading(false);
-    }
+    showStatus('Moeda atualizada no rascunho! Clique em "Publicar para Firebase" quando terminar de revisar.', 'info');
   };
 
-  const handleDeleteCoin = async (id: string, symbol: string) => {
-    if (!confirm(`Tem certeza que deseja remover a moeda ${symbol}?`)) return;
-    const updated = coins.filter(c => c.id !== id);
-    setCoins(updated);
-    setLoading(true);
-    try {
-      await setDoc(doc(db, 'system_data/coins'), { list: updated });
-      storage.saveCoins(updated);
-      storage.addSyncLog('ADMIN_EDIT', `Moeda ${symbol} excluída.`);
-      showStatus(`Moeda ${symbol} removida com sucesso.`, 'success');
-    } catch (err) {
-      console.error(err);
-      storage.saveCoins(updated);
-      showStatus('Removido localmente', 'info');
-    } finally {
-      setLoading(false);
+  const handleDeleteCoin = (id: string, symbol: string) => {
+    if (window.confirm(`Tem certeza de que deseja remover ${symbol} do rascunho?`)) {
+      const updatedList = draftCoins.filter(c => c.id !== id);
+      setDraftCoins(updatedList);
+      showStatus(`Moeda ${symbol} removida do rascunho.`, 'info');
     }
   };
 
@@ -1100,156 +1322,463 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ onBackToWallet }) => {
             </div>
           )}
 
-          {/* TAB 4: CADASTRAR & EDITAR MOEDAS */}
+          {/* TAB 4: CADASTRAR & EDITAR MOEDAS & INTEGRAÇÃO COM API PÚBLICA */}
           {activeTab === 'coins' && (
             <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-6 shadow-xl space-y-6">
-              <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+              
+              {/* Header & Main Actions */}
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-slate-800 pb-5">
                 <div>
                   <h3 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-                    <Coins className="w-5 h-5 text-emerald-400" /> Cadastrar & Editar Criptomoedas
+                    <Globe className="w-5 h-5 text-cyan-400" /> Gerenciador de Criptomoedas & API Pública
                   </h3>
                   <p className="text-xs text-slate-400 mt-1 font-mono">
-                    Gerencie as moedas disponíveis na carteira e sincronizadas no servidor.
+                    Consulte cotações em tempo real de APIs públicas gratuitas (CoinGecko/CoinCap), revise e edite os dados localmente no painel antes de publicar para o Firebase.
                   </p>
                 </div>
-                <button
-                  onClick={handleOpenAddCoin}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded-lg text-xs font-mono transition-all shadow-lg cursor-pointer"
-                >
-                  <Plus className="w-4 h-4" /> Cadastrar Nova Moeda
-                </button>
+
+                <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                  {/* Import from Public API Button */}
+                  <button
+                    onClick={fetchCoinsFromPublicApi}
+                    disabled={isImportingApi || loading}
+                    className="px-4 py-2.5 bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold rounded-lg transition-all shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <Download className={`w-4 h-4 ${isImportingApi ? 'animate-bounce' : ''}`} />
+                    {isImportingApi ? 'Consultando API Pública...' : 'Importar da API'}
+                  </button>
+
+                  {/* Add New Coin Manually */}
+                  <button
+                    onClick={handleOpenAddCoin}
+                    className="px-3.5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg transition-all flex items-center gap-2 cursor-pointer border border-slate-700"
+                  >
+                    <Plus className="w-4 h-4 text-emerald-400" /> Nova Moeda
+                  </button>
+
+                  {/* Publish to Firebase Button */}
+                  <button
+                    onClick={handlePublishToFirebase}
+                    disabled={loading || draftCoins.length === 0}
+                    className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-black rounded-lg transition-all shadow-lg shadow-emerald-900/40 flex items-center gap-2 cursor-pointer uppercase tracking-wider"
+                  >
+                    <UploadCloud className="w-4.5 h-4.5" /> Publicar para Firebase
+                  </button>
+                </div>
               </div>
 
-              {/* Form Modal/Section */}
-              {isEditingCoin && (
-                <div className="bg-slate-950 p-5 rounded-xl border border-cyan-500/40 space-y-4">
-                  <h4 className="text-sm font-bold text-cyan-400 font-mono uppercase">
-                    {editingCoinId ? 'Editar Moeda Existente' : 'Cadastrar Nova Moeda'}
-                  </h4>
+              {/* Status Indicators & Metadata Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs font-mono">
+                <div className="flex items-center gap-2 text-slate-300">
+                  <Clock className="w-4 h-4 text-cyan-400" />
+                  <span>Última importação da API:</span>
+                  <span className="text-cyan-300 font-bold">
+                    {lastApiImportTime ? lastApiImportTime : 'Nenhuma importação nesta sessão'}
+                  </span>
+                </div>
 
-                  <form onSubmit={handleSaveCoin} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs font-mono">
+                <div className="flex items-center gap-3">
+                  <span className="text-slate-400">Total no Rascunho: <strong className="text-slate-100">{draftCoins.length}</strong></span>
+                  <span className="text-slate-400">Publicadas no Banco: <strong className="text-emerald-400">{coins.length}</strong></span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleRestoreApiData}
+                    disabled={!lastApiFetchedList}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded transition-all cursor-pointer disabled:opacity-40 flex items-center gap-1 text-[11px]"
+                    title="Restaurar dados originais da última importação da API"
+                  >
+                    <RotateCcw className="w-3 h-3 text-cyan-400" /> Restaurar Dados da API
+                  </button>
+
+                  <button
+                    onClick={handleCancelDraftChanges}
+                    className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-rose-300 border border-slate-700 rounded transition-all cursor-pointer flex items-center gap-1 text-[11px]"
+                    title="Descartar rascunho e recarregar dados ativos do Firebase"
+                  >
+                    <XCircle className="w-3 h-3 text-rose-400" /> Cancelar Alterações
+                  </button>
+                </div>
+              </div>
+
+              {/* API Success / Error Banners */}
+              {isImportingApi && (
+                <div className="p-4 bg-cyan-950/40 border border-cyan-500/40 rounded-xl flex items-center gap-3 text-cyan-300 font-mono text-xs">
+                  <RefreshCw className="w-5 h-5 animate-spin text-cyan-400" />
+                  <div>
+                    <strong className="block">Consultando API pública externa...</strong>
+                    <span>Conectando aos endpoints públicos de cotações (CoinGecko / CoinCap) sem chave de API.</span>
+                  </div>
+                </div>
+              )}
+
+              {apiImportSuccess && !isImportingApi && (
+                <div className="p-3.5 bg-emerald-950/40 border border-emerald-500/40 rounded-xl flex items-center justify-between text-emerald-300 font-mono text-xs">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="w-4 h-4 text-emerald-400" />
+                    <span>{apiImportSuccess}</span>
+                  </div>
+                  <button onClick={() => setApiImportSuccess(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+              )}
+
+              {apiImportError && !isImportingApi && (
+                <div className="p-3.5 bg-rose-950/40 border border-rose-500/40 rounded-xl flex items-center justify-between text-rose-300 font-mono text-xs">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                    <span>{apiImportError}</span>
+                  </div>
+                  <button onClick={() => setApiImportError(null)} className="text-slate-400 hover:text-white">✕</button>
+                </div>
+              )}
+
+              {/* Re-import / Conflict Resolution Strategy Modal */}
+              {showImportStrategyModal && (
+                <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+                  <div className="bg-slate-900 border border-cyan-500/50 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-5 font-mono">
+                    <div className="flex items-center gap-3 text-cyan-400">
+                      <Sparkles className="w-6 h-6" />
+                      <h4 className="text-base font-bold text-slate-100 uppercase tracking-wider">
+                        Re-importação Detectada
+                      </h4>
+                    </div>
+
+                    <p className="text-xs text-slate-300">
+                      Você já possui edições manuais ou moedas customizadas no rascunho. Como deseja aplicar os novos dados trazidos da API pública?
+                    </p>
+
+                    <div className="space-y-3 pt-2">
+                      <button
+                        onClick={() => handleApplyApiImportStrategy('preserve_edits')}
+                        className="w-full text-left p-3.5 bg-slate-950 hover:bg-slate-800 border border-cyan-500/40 rounded-xl transition-all cursor-pointer group"
+                      >
+                        <div className="font-bold text-cyan-300 text-xs flex items-center gap-2">
+                          <Check className="w-4 h-4 text-cyan-400" /> Manter Minhas Alterações (Recomendado)
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Preserva todas as moedas modificadas manualmente e atualiza/adiciona as demais vindo da API.
+                        </p>
+                      </button>
+
+                      <button
+                        onClick={() => handleApplyApiImportStrategy('merge')}
+                        className="w-full text-left p-3.5 bg-slate-950 hover:bg-slate-800 border border-purple-500/40 rounded-xl transition-all cursor-pointer group"
+                      >
+                        <div className="font-bold text-purple-300 text-xs flex items-center gap-2">
+                          <RefreshCw className="w-4 h-4 text-purple-400" /> Mesclar (Atualizar Cotações + Manter Nomes/Cores)
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Atualiza apenas Preço e Variação 24h da API, mantendo seus nomes, cores, ordem e status editados.
+                        </p>
+                      </button>
+
+                      <button
+                        onClick={() => handleApplyApiImportStrategy('replace')}
+                        className="w-full text-left p-3.5 bg-slate-950 hover:bg-slate-800 border border-rose-500/40 rounded-xl transition-all cursor-pointer group"
+                      >
+                        <div className="font-bold text-rose-300 text-xs flex items-center gap-2">
+                          <RotateCcw className="w-4 h-4 text-rose-400" /> Substituir Todos Os Dados
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Sobrescreve completamente o rascunho atual pelos dados frescos retornados da API pública.
+                        </p>
+                      </button>
+                    </div>
+
+                    <div className="pt-2 flex justify-end">
+                      <button
+                        onClick={() => setShowImportStrategyModal(false)}
+                        className="px-4 py-2 bg-slate-800 text-slate-400 hover:text-slate-200 rounded text-xs cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Form Modal/Section for Editing or Adding Coin */}
+              {isEditingCoin && (
+                <div className="bg-slate-950 p-5 rounded-xl border border-cyan-500/40 space-y-4 font-mono">
+                  <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+                    <h4 className="text-sm font-bold text-cyan-400 uppercase">
+                      {editingCoinId ? 'Editar Moeda no Rascunho' : 'Cadastrar Nova Moeda'}
+                    </h4>
+                    <span className="text-[10px] text-amber-400 bg-amber-950/60 border border-amber-800 px-2 py-0.5 rounded">
+                      RASCUNHO LOCAL (Requer publicação)
+                    </span>
+                  </div>
+
+                  <form onSubmit={handleSaveCoin} className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                     <div>
-                      <label className="block text-slate-300 mb-1">Nome da Moeda:</label>
+                      <label className="block text-slate-300 mb-1 font-bold">Nome da Moeda:</label>
                       <input
                         type="text"
                         value={coinForm.name}
                         onChange={(e) => setCoinForm({ ...coinForm, name: e.target.value })}
                         placeholder="Ex: Bitcoin"
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 outline-none"
                         required
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 mb-1">Sigla (Symbol):</label>
+                      <label className="block text-slate-300 mb-1 font-bold">Sigla (Symbol):</label>
                       <input
                         type="text"
                         value={coinForm.symbol}
                         onChange={(e) => setCoinForm({ ...coinForm, symbol: e.target.value })}
                         placeholder="Ex: BTC"
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100 uppercase"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 uppercase outline-none"
                         required
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 mb-1">Preço Inicial (USD):</label>
+                      <label className="block text-slate-300 mb-1 font-bold">Preço Atual (USD):</label>
                       <input
                         type="number"
-                        step="0.0001"
+                        step="0.000001"
                         value={coinForm.price}
                         onChange={(e) => setCoinForm({ ...coinForm, price: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 outline-none"
                         required
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 mb-1">Variação 24h (%):</label>
+                      <label className="block text-slate-300 mb-1 font-bold">Variação 24h (%):</label>
                       <input
                         type="number"
-                        step="0.1"
+                        step="0.01"
                         value={coinForm.variation}
                         onChange={(e) => setCoinForm({ ...coinForm, variation: parseFloat(e.target.value) || 0 })}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 outline-none"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-slate-300 mb-1">Cor Hexadecimal:</label>
+                      <label className="block text-slate-300 mb-1 font-bold">Categoria:</label>
                       <input
-                        type="color"
-                        value={coinForm.color}
-                        onChange={(e) => setCoinForm({ ...coinForm, color: e.target.value })}
-                        className="w-full h-9 bg-slate-900 border border-slate-700 rounded p-1 cursor-pointer"
+                        type="text"
+                        value={coinForm.category}
+                        onChange={(e) => setCoinForm({ ...coinForm, category: e.target.value })}
+                        placeholder="Ex: Layer 1, DeFi, Memes"
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 outline-none"
                       />
                     </div>
 
-                    <div className="sm:col-span-2 md:col-span-3 flex justify-end gap-2 pt-2">
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-bold">Ordem de Exibição:</label>
+                      <input
+                        type="number"
+                        value={coinForm.displayOrder}
+                        onChange={(e) => setCoinForm({ ...coinForm, displayOrder: parseInt(e.target.value) || 1 })}
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-bold">Status:</label>
+                      <select
+                        value={coinForm.status}
+                        onChange={(e) => setCoinForm({ ...coinForm, status: e.target.value as 'active' | 'inactive' })}
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 outline-none"
+                      >
+                        <option value="active">Ativo (Visível na carteira)</option>
+                        <option value="inactive">Inativo (Oculto)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-bold">Cor Hexadecimal:</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={coinForm.color}
+                          onChange={(e) => setCoinForm({ ...coinForm, color: e.target.value })}
+                          className="w-10 h-9 bg-slate-900 border border-slate-700 rounded p-1 cursor-pointer"
+                        />
+                        <input
+                          type="text"
+                          value={coinForm.color}
+                          onChange={(e) => setCoinForm({ ...coinForm, color: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-slate-100 uppercase outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-300 mb-1 font-bold">URL da Imagem / Ícone (Opção da API):</label>
+                      <input
+                        type="url"
+                        value={coinForm.iconUrl}
+                        onChange={(e) => setCoinForm({ ...coinForm, iconUrl: e.target.value })}
+                        placeholder="https://..."
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded px-3 py-2 text-slate-100 outline-none"
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2 md:col-span-3 flex justify-end gap-2 pt-2 border-t border-slate-800">
                       <button
                         type="button"
                         onClick={() => setIsEditingCoin(false)}
-                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono"
+                        className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded font-mono cursor-pointer"
                       >
                         Cancelar
                       </button>
                       <button
                         type="submit"
-                        disabled={loading}
-                        className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold rounded font-mono"
+                        className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold rounded font-mono cursor-pointer flex items-center gap-1.5"
                       >
-                        Salvar Moeda
+                        <Save className="w-4 h-4" /> Atualizar no Rascunho
                       </button>
                     </div>
                   </form>
                 </div>
               )}
 
-              {/* Coins List Table */}
-              <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                <table className="w-full text-left border-collapse text-xs font-mono">
-                  <thead>
-                    <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-bold uppercase">
-                      <th className="p-3">Moeda</th>
-                      <th className="p-3">Sigla</th>
-                      <th className="p-3">Preço USD</th>
-                      <th className="p-3">Variação</th>
-                      <th className="p-3 text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {coins.map((c) => (
-                      <tr key={c.id} className="hover:bg-slate-900/40">
-                        <td className="p-3 font-bold text-slate-100 flex items-center gap-2">
-                          <span className="w-3 h-3 rounded-full" style={{ backgroundColor: c.color }} />
-                          {c.name}
-                        </td>
-                        <td className="p-3 text-cyan-400 font-bold">{c.symbol}</td>
-                        <td className="p-3 text-slate-200 font-bold">
-                          US$ {c.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}
-                        </td>
-                        <td className={`p-3 font-bold ${c.variation >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                          {c.variation >= 0 ? '+' : ''}{c.variation}%
-                        </td>
-                        <td className="p-3 text-right space-x-2">
-                          <button
-                            onClick={() => handleOpenEditCoin(c)}
-                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded cursor-pointer"
-                          >
-                            <Edit className="w-3.5 h-3.5 inline" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteCoin(c.id, c.symbol)}
-                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded cursor-pointer"
-                          >
-                            <Trash2 className="w-3.5 h-3.5 inline" />
-                          </button>
-                        </td>
-                      </tr>
+              {/* Search & Filter Toolbar */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 font-mono text-xs">
+                {/* Search Bar */}
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-500 absolute left-3 top-3" />
+                  <input
+                    type="text"
+                    value={coinSearchQuery}
+                    onChange={(e) => setCoinSearchQuery(e.target.value)}
+                    placeholder="Pesquisar por nome ou símbolo (ex: BTC, Ethereum)..."
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-950 border border-slate-800 focus:border-cyan-500/60 rounded-xl text-slate-200 outline-none"
+                  />
+                </div>
+
+                {/* Category Filter */}
+                <div className="flex items-center gap-2">
+                  <Filter className="w-4 h-4 text-cyan-400 shrink-0" />
+                  <select
+                    value={coinCategoryFilter}
+                    onChange={(e) => setCoinCategoryFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500/60 rounded-xl px-3 py-2.5 text-slate-200 outline-none"
+                  >
+                    <option value="TODAS">Todas as Categorias</option>
+                    {Array.from(new Set(draftCoins.map(c => c.category || 'Geral'))).map(cat => (
+                      <option key={cat} value={cat}>{cat}</option>
                     ))}
-                  </tbody>
-                </table>
+                  </select>
+                </div>
+
+                {/* Status Filter */}
+                <div className="flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <select
+                    value={coinStatusFilter}
+                    onChange={(e) => setCoinStatusFilter(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-800 focus:border-cyan-500/60 rounded-xl px-3 py-2.5 text-slate-200 outline-none"
+                  >
+                    <option value="ALL">Todos os Status (Ativos + Inativos)</option>
+                    <option value="active">Somente Ativos</option>
+                    <option value="inactive">Somente Inativos</option>
+                  </select>
+                </div>
               </div>
+
+              {/* Coins Draft Table */}
+              {(() => {
+                const filteredDrafts = draftCoins.filter(c => {
+                  const matchesSearch = c.name.toLowerCase().includes(coinSearchQuery.toLowerCase()) || 
+                                        c.symbol.toLowerCase().includes(coinSearchQuery.toLowerCase());
+                  const matchesCategory = coinCategoryFilter === 'TODAS' || (c.category || 'Geral') === coinCategoryFilter;
+                  const matchesStatus = coinStatusFilter === 'ALL' || (c.status || 'active') === coinStatusFilter;
+                  return matchesSearch && matchesCategory && matchesStatus;
+                });
+
+                return (
+                  <div className="overflow-x-auto border border-slate-800 rounded-xl bg-slate-950/60">
+                    <table className="w-full text-left border-collapse text-xs font-mono">
+                      <thead>
+                        <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-bold uppercase tracking-wider text-[11px]">
+                          <th className="p-3">#</th>
+                          <th className="p-3">Moeda</th>
+                          <th className="p-3">Sigla</th>
+                          <th className="p-3">Preço USD</th>
+                          <th className="p-3">Variação 24h</th>
+                          <th className="p-3">Categoria</th>
+                          <th className="p-3">Status</th>
+                          <th className="p-3 text-right">Ações</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {filteredDrafts.length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="text-center py-8 text-slate-500">
+                              Nenhuma moeda encontrada no rascunho. Clique em "Importar da API" para carregar.
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredDrafts.map((c, index) => (
+                            <tr key={c.id} className="hover:bg-slate-900/40 transition-colors">
+                              <td className="p-3 text-slate-500 font-bold">{c.displayOrder || index + 1}</td>
+                              <td className="p-3 font-bold text-slate-100 flex items-center gap-2">
+                                {c.iconUrl ? (
+                                  <img src={c.iconUrl} alt={c.name} className="w-5 h-5 rounded-full object-cover shrink-0" />
+                                ) : (
+                                  <span className="w-3.5 h-3.5 rounded-full shrink-0" style={{ backgroundColor: c.color }} />
+                                )}
+                                <span className="truncate">{c.name}</span>
+                                {c.isManuallyEdited && (
+                                  <span className="text-[9px] bg-cyan-950 text-cyan-300 border border-cyan-800 px-1.5 py-0.2 rounded uppercase font-bold" title="Editado manualmente">
+                                    Editado
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-cyan-400 font-bold">{c.symbol}</td>
+                              <td className="p-3 text-slate-100 font-bold">
+                                US$ {c.price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 6 })}
+                              </td>
+                              <td className={`p-3 font-bold ${c.variation >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                                {c.variation >= 0 ? '+' : ''}{c.variation.toFixed(2)}%
+                              </td>
+                              <td className="p-3 text-slate-400">
+                                <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-[10px]">
+                                  {c.category || 'Geral'}
+                                </span>
+                              </td>
+                              <td className="p-3">
+                                {c.status === 'inactive' ? (
+                                  <span className="text-[10px] bg-rose-950/60 text-rose-300 border border-rose-800/80 px-2 py-0.5 rounded uppercase font-bold flex items-center gap-1 w-fit">
+                                    <EyeOff className="w-3 h-3 text-rose-400" /> Inativo
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] bg-emerald-950/60 text-emerald-300 border border-emerald-800/80 px-2 py-0.5 rounded uppercase font-bold flex items-center gap-1 w-fit">
+                                    <Eye className="w-3 h-3 text-emerald-400" /> Ativo
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3 text-right space-x-2">
+                                <button
+                                  onClick={() => handleOpenEditCoin(c)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 rounded cursor-pointer transition-colors"
+                                  title="Editar esta moeda no rascunho"
+                                >
+                                  <Edit className="w-3.5 h-3.5 inline" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteCoin(c.id, c.symbol)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-rose-400 rounded cursor-pointer transition-colors"
+                                  title="Remover moeda do rascunho"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 inline" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           )}
 
